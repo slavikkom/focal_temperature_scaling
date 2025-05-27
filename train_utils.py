@@ -54,7 +54,7 @@ def train_single_epoch(epoch,
             loss = loss / len(data)
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm(model.parameters(), 2)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
         train_loss += loss.item()
         optimizer.step()
         num_samples += len(data)
