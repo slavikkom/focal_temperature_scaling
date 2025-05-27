@@ -60,6 +60,7 @@ class ModelWithTemperature(nn.Module):
         self.log = log
         self.gamma = gamma
         self.softmax = softmax
+        self.new_method = False
 
 
     def forward(self, input):
@@ -77,26 +78,33 @@ class ModelWithTemperature(nn.Module):
 
     def set_temperature(self,
                         valid_loader,
-                        cross_validate='ce'):
+                        cross_validate='ce',
+                        device='cuda'):
         """
         Tune the tempearature of the model (using the validation set) with cross-validation on ECE or NLL
         """
-        self.cuda()
+        # self.cuda()
+        self.to(device)
         self.model.eval()
-        nll_criterion = nn.NLLLoss().cuda()
-        ece_criterion = AdaptiveECELoss().cuda()
+        # nll_criterion = nn.NLLLoss().cuda()
+        # ece_criterion = AdaptiveECELoss().cuda()
+        nll_criterion = nn.NLLLoss().to(device)
+        ece_criterion = AdaptiveECELoss().to(device)
 
         # First: collect all the logits and labels for the validation set
         logits_list = []
         labels_list = []
         with torch.no_grad():
             for input, label in valid_loader:
-                input = input.cuda()
+                # input = input.cuda()
+                input = input.to(device)
                 logits = self.model(input)
                 logits_list.append(logits)
                 labels_list.append(label)
-            logits = torch.cat(logits_list).cuda()
-            labels = torch.cat(labels_list).cuda()
+            # logits = torch.cat(logits_list).cuda()
+            # labels = torch.cat(labels_list).cuda()
+            logits = torch.cat(logits_list).to(device)
+            labels = torch.cat(labels_list).to(device)
 
         # Calculate NLL and ECE before temperature scaling
         print("Current gamma is ", self.gamma)
@@ -126,7 +134,8 @@ class ModelWithTemperature(nn.Module):
         
         for i in range(100):
             self.temperature = T
-            self.cuda()
+            # self.cuda()
+            self.to(device)
             probs = None
             if self.new_method:
                 probs = torch.nn.Softmax(dim=1)(torch.log(multi_focal_link(logits, self.gamma)) / T)
@@ -155,7 +164,7 @@ class ModelWithTemperature(nn.Module):
             self.temperature = T_opt_ece
         else:
             self.temperature = T_opt_nll
-        self.cuda()
+        self.to(device)
 
         # Calculate NLL and ECE after temperature scaling
         probs = None

@@ -7,6 +7,22 @@ The paper introduces focal temperature scaling - a novel approach for calibratin
 
 Most of the code for training, evaluation and calibration of the baseline methods were borrowed from repositories https://github.com/3mcloud/adafocal and https://github.com/torrvision/focal_calibration .
 
+
+# Setup
+
+Setup the conda evironment simply by the following commands:
+```
+conda env create --name focal_scaling --file environment.yml
+conda activate focal_scaling
+```
+
+Setup the imagenet dataset using the following commands:
+```
+wget http://cs231n.stanford.edu/tiny-imagenet-200.zip 
+
+unzip tiny-imagenet-200.zip "tiny-imagenet-200/*" -d ../TINY_IMAGENET_DIRECTORY && mv ../TINY_IMAGENET_DIRECTORY/tiny-imagenet-200/* ../TINY_IMAGENET_DIRECTORY/ && rmdir ../TINY_IMAGENET_DIRECTORY/tiny-imagenet-200
+```
+
 # Training:
 
 The folder train_scripts contains examples of the code to run different training methods.

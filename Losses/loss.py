@@ -9,6 +9,7 @@ Implementation of the following loss functions:
 
 from torch.nn import functional as F
 from Losses.focal_loss import FocalLoss
+from Losses.adafocal import AdaFocal
 from Losses.focal_loss_adaptive_gamma import FocalLossAdaptive
 from Losses.mmce import MMCE, MMCE_weighted
 from Losses.brier_score import BrierScore

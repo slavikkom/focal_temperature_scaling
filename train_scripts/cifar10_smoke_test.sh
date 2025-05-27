@@ -1,13 +1,13 @@
 ########## RESNET50 ##################
-
+# Runs the experiments for a smoke test. Add -g to each command to run on gpu instead of cpu
 ##CE
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --dataset cifar10 \
 --model resnet50 \
 --loss cross_entropy \
 --decay 0.0005 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
 
 
 ##Focal loss with fixed gamma 1 (FL-1)
@@ -16,8 +16,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss --gamma 1.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Focal loss with fixed gamma 2 (FL-2)
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -25,8 +26,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss --gamma 2.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Focal loss with fixed gamma 3 (FL-3)
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -34,8 +36,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss --gamma 3.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Focal loss with fixed gamma 5 (FL-5)
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -43,8 +46,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss --gamma 5.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Focal loss with fixed gamma 7 (FL-7)
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -52,8 +56,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss --gamma 7.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Focal loss with sample dependent gamma 5,3 (FLSD-53)
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -61,8 +66,9 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --decay 0.0005 \
 --loss focal_loss_adaptive --gamma 3.0 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test
+
 
 ##Adafocal
 CUDA_VISIBLE_DEVICES=0 python ../train.py \
@@ -70,5 +76,5 @@ CUDA_VISIBLE_DEVICES=0 python ../train.py \
 --model resnet50 \
 --loss adafocal \
 --decay 0.0005 \
--g \
---save-path ../MODEL_DIRECTORY/
+--save-path ../MODEL_DIRECTORY/ \
+--smoke-test

@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 import random
 import json
 import sys
+import os
 
 # Import dataloaders
 import Data.cifar10 as cifar10
@@ -69,7 +70,8 @@ def loss_function_save_name(loss_function,
         'focal_loss_adaptive': 'focal_loss_adaptive_gamma_' + str(gamma),
         'mmce': 'mmce_lamda_' + str(lamda),
         'mmce_weighted': 'mmce_weighted_lamda_' + str(lamda),
-        'brier_score': 'brier_score'
+        'brier_score': 'brier_score',
+        'adafocal': 'adafocal'
     }
     if (loss_function == 'focal_loss' and scheduled == True):
         res_str = 'focal_loss_scheduled_gamma_' + str(gamma1) + '_' + str(gamma2) + '_' + str(gamma3)
@@ -117,7 +119,7 @@ def parseArgs():
 
     parser.add_argument("-g", action="store_true", dest="gpu",
                         help="Use GPU")
-    parser.set_defaults(gpu=True)
+    parser.set_defaults(gpu=False)
     parser.add_argument("--load", action="store_true", dest="load",
                         help="Load from pretrained model")
     parser.set_defaults(load=False)
@@ -183,6 +185,10 @@ def parseArgs():
     parser.add_argument("--second-milestone", type=int, default=second_milestone,
                         dest="second_milestone", help="Second milestone to change lr")
 
+    parser.add_argument("--smoke-test", action="store_true", dest="smoke_test",
+                        help="Run a lightweight smoke test")
+    parser.set_defaults(smoke_test=False)
+
     return parser.parse_args()
 
 
@@ -190,6 +196,15 @@ if __name__ == "__main__":
 
     torch.manual_seed(1)
     args = parseArgs()
+
+    if args.smoke_test:
+        print("Running in smoke test mode...")
+        args.epoch = 1  # Only 1 epoch
+        # args.gpu = False
+        args.save_interval = 1
+        args.train_batch_size = 16  # Small batch size
+        args.test_batch_size = 16  # Small batch size
+        # args.dataset_root = './data/smoke_test/'  # Use a small dataset
 
     cuda = False
     if (torch.cuda.is_available() and args.gpu):
@@ -206,7 +221,6 @@ if __name__ == "__main__":
     # Setting model name
     if args.model_name is None:
         args.model_name = args.model
-
 
     if args.gpu is True:
         net.cuda()
@@ -239,25 +253,29 @@ if __name__ == "__main__":
             root=args.dataset_root,
             split='train',
             batch_size=args.train_batch_size,
-            pin_memory=args.gpu)
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
 
         val_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='val',
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu)
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='val',
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu)
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
     else:
         train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=args.train_batch_size,
             augment=args.data_aug,
             random_seed=1,
-            pin_memory=args.gpu
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test,
         )
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
@@ -315,6 +333,11 @@ if __name__ == "__main__":
         val_set_loss[epoch] = val_loss
         test_set_loss[epoch] = test_loss
         val_set_err[epoch] = 1 - val_acc
+
+
+        # Ensure the save directory exists
+        if not os.path.exists(args.save_loc):
+            os.makedirs(args.save_loc)
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc

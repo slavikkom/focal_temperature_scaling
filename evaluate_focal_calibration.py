@@ -4,6 +4,8 @@ from torch.nn import functional as F
 import numpy as np
 
 from temperature_scaling import ModelWithTemperature
+from Metrics.metrics import AdaptiveECELoss
+from temperature_scaling import multi_focal_link
 
 gamma_link_list = [-1, -0.75, -0.5,-0.25, 0, 0.25, 0.5, 0.75, 1, 3, 5, 100]
 
@@ -44,7 +46,7 @@ def get_probs(logits, T=1, a=1, softmax=False):
     
     return probs
 
-def focal_calibration_evaluation(net, valLoader, val_logits, val_labels, test_logits, test_labels, num_classes=10):
+def focal_calibration_evaluation(net, valLoader, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda'):
     evaluation_metrics = {'val': {'calibrated': {},
      'uncalibrated': {}},
         'test': {'calibrated': {}, 'uncalibrated': {}}}
@@ -57,7 +59,7 @@ def focal_calibration_evaluation(net, valLoader, val_logits, val_labels, test_lo
         for g_counter, gamma in enumerate(gamma_link_list):
     
             scaled_model = ModelWithTemperature(net, gamma=gamma, softmax=int(gamma>50))
-            scaled_model.set_temperature(valLoader, cross_validate=T_criteria)
+            scaled_model.set_temperature(valLoader, cross_validate=T_criteria, device=device)
             T_opt = scaled_model.get_temperature()
             
             gamma_dict[str(round(gamma, 2)) + "_CE"] = scaled_model.nll_vals

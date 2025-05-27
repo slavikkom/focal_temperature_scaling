@@ -83,7 +83,7 @@ def parseArgs():
                         help='Number of bins')
     parser.add_argument("-g", action="store_true", dest="gpu",
                         help="Use GPU")
-    parser.set_defaults(gpu=True)
+    parser.set_defaults(gpu=False)
     parser.add_argument("-da", action="store_true", dest="data_aug",
                         help="Using data augmentation")
     parser.set_defaults(data_aug=True)
@@ -96,21 +96,28 @@ def parseArgs():
     parser.add_argument("-log", action="store_true", dest="log",
                         help="whether to print log data")
 
+    parser.add_argument("--smoke-test", action="store_true", dest="smoke_test",
+                    help="Run a lightweight smoke test")
+    parser.set_defaults(smoke_test=False)
+
     return parser.parse_args()
 
 
-def get_logits_labels(data_loader, net):
+def get_logits_labels(data_loader, net, device):
     logits_list = []
     labels_list = []
     net.eval()
     with torch.no_grad():
         for data, label in data_loader:
-            data = data.cuda()
+            # data = data.cuda()
+            data = data.to(device)
             logits = net(data)
             logits_list.append(logits)
             labels_list.append(label)
-        logits = torch.cat(logits_list).cuda()
-        labels = torch.cat(labels_list).cuda()
+        # logits = torch.cat(logits_list).cuda()
+        # labels = torch.cat(labels_list).cuda()
+        logits = torch.cat(logits_list).to(device)
+        labels = torch.cat(labels_list).to(device)
     return logits, labels
 
 
@@ -126,6 +133,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if cuda else "cpu")
 
     args = parseArgs()
+
+    if args.smoke_test:
+        print("Running in smoke test mode...")
+        # args.gpu = False  
+        args.test_batch_size = 16  # Small batch size
 
     if args.model_name is None:
         args.model_name = args.model
@@ -145,40 +157,53 @@ if __name__ == "__main__":
             root=args.dataset_root,
             split='val',
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu)
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='val',
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu)
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
     else:
         _, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=args.train_batch_size,
             augment=args.data_aug,
             random_seed=1,
-            pin_memory=args.gpu
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test
         )
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test
         )
 
     model = models[model_name]
 
     net = model(num_classes=num_classes, temp=1.0)
-    net.cuda()
-    net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
+    if cuda:
+        net.cuda()
+        # net.to(device)
+        net = torch.nn.DataParallel(net, device_ids=range(torch.cuda.device_count()))
+    else:
+        net.to(device)
     cudnn.benchmark = True
     net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
+    
+    # nll_criterion = nn.CrossEntropyLoss().cuda()
+    # ece_criterion = ECELoss().cuda()
+    # adaece_criterion = AdaptiveECELoss().cuda()
+    # cece_criterion = ClasswiseECELoss().cuda()
 
-    nll_criterion = nn.CrossEntropyLoss().cuda()
-    ece_criterion = ECELoss().cuda()
-    adaece_criterion = AdaptiveECELoss().cuda()
-    cece_criterion = ClasswiseECELoss().cuda()
+    nll_criterion = nn.CrossEntropyLoss().to(device)
+    ece_criterion = ECELoss().to(device)
+    adaece_criterion = AdaptiveECELoss().to(device)
+    cece_criterion = ClasswiseECELoss().to(device)
 
-    logits, labels = get_logits_labels(test_loader, net)
+    logits, labels = get_logits_labels(test_loader, net, device)
     conf_matrix, p_accuracy, _, _, _ = test_classification_net_logits(logits, labels)
 
     p_ece = ece_criterion(logits, labels).item()
@@ -199,9 +224,9 @@ if __name__ == "__main__":
 
 
     scaled_model = ModelWithTemperature(net, args.log)
-    scaled_model.set_temperature(val_loader, cross_validate=cross_validation_error)
+    scaled_model.set_temperature(val_loader, cross_validate=cross_validation_error, device=device)
     T_opt = scaled_model.get_temperature()
-    logits, labels = get_logits_labels(test_loader, scaled_model)
+    logits, labels = get_logits_labels(test_loader, scaled_model, device=device)
     conf_matrix, accuracy, _, _, _ = test_classification_net_logits(logits, labels)
 
     ece = ece_criterion(logits, labels).item()
@@ -209,9 +234,9 @@ if __name__ == "__main__":
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
     
-    val_logits, val_labels = get_logits_labels(val_loader, net)
-    test_logits, test_labels = get_logits_labels(test_loader, net)
-    stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels, num_classes=num_classes)
+    val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
+    test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
+    stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels, num_classes=num_classes, device=device)
     
     saved_stats_name = "_".join(saved_model_name.split(".m")[0].split("_")[-5:])
     with open(saved_stats_name + ".json", 'w') as f:

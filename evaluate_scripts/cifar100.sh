@@ -3,6 +3,7 @@
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_cross_entropy_350.model \
@@ -11,6 +12,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_gamma_1.0_350.model \
@@ -19,6 +21,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_gamma_2.0_350.model \
@@ -27,6 +30,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_gamma_3.0_350.model \
@@ -35,6 +39,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_gamma_5.0_350.model \
@@ -43,6 +48,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_gamma_7.0_350.model \
@@ -51,6 +57,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_focal_loss_adaptive_gamma_3.0_350.model \
@@ -59,6 +66,7 @@ CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 CUDA_VISIBLE_DEVICES=0 python ../evaluate.py \
 --dataset cifar100 \
 --model resnet50 \
+-g \
 -log \
 --save-path ../MODEL_DIRECTORY/ \
 --saved_model_name resnet50_adafocal_350.model \

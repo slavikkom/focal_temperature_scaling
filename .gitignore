@@ -2,3 +2,9 @@ data
 __pycache__
 tiny-imagenet-200
 *.model
+TINY_IMAGENET_DIRECTORY/
+MODEL_DIRECTORY/
+evaluate_scripts/**/*.json
+evaluate_scripts/**/*.txt
+*.zip
+
