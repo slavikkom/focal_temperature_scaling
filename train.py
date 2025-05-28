@@ -5,6 +5,7 @@ Script for training models.
 from torch import optim
 import torch
 import torch.utils.data
+from torch.cuda.amp import GradScaler
 import argparse
 import torch.backends.cudnn as cudnn
 import random
@@ -33,6 +34,7 @@ from train_utils import train_single_epoch, test_single_epoch
 
 # Import validation metrics
 from Metrics.metrics import test_classification_net
+
 
 
 dataset_num_classes = {
@@ -189,6 +191,10 @@ def parseArgs():
                         help="Run a lightweight smoke test")
     parser.set_defaults(smoke_test=False)
 
+    parser.add_argument("--amp", action="store_true", dest="use_amp",
+                    help="Enable mixed precision training")
+    parser.set_defaults(use_amp=False)
+
     return parser.parse_args()
 
 
@@ -212,6 +218,12 @@ if __name__ == "__main__":
     device = torch.device("cuda" if cuda else "cpu")
     print("CUDA set: " + str(cuda))
 
+    scaler = GradScaler() if (cuda and args.use_amp) else None
+    if scaler is not None:
+        use_amp = True
+        print("Using mixed precision training with GradScaler.")
+    else:
+        use_amp = False
 
     num_classes = dataset_num_classes[args.dataset]
 
@@ -311,7 +323,8 @@ if __name__ == "__main__":
                                         loss_function=args.loss_function,
                                         gamma=gamma,
                                         lamda=args.lamda,
-                                        loss_mean=args.loss_mean)
+                                        loss_mean=args.loss_mean,
+                                        scaler=scaler)
         scheduler.step()
         val_loss = test_single_epoch(epoch,
                                      net,
@@ -326,8 +339,9 @@ if __name__ == "__main__":
                                       device,
                                       loss_function=args.loss_function,
                                       gamma=gamma,
-                                      lamda=args.lamda)
-        _, val_acc, _, _, _ = test_classification_net(net, val_loader, device)
+                                      lamda=args.lamda,
+                                      use_amp=use_amp)
+        _, val_acc, _, _, _ = test_classification_net(net, val_loader, device, use_amp=use_amp)
 
         training_set_loss[epoch] = train_loss
         val_set_loss[epoch] = val_loss

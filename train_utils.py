@@ -5,6 +5,7 @@ This module contains methods for training models with different loss functions.
 import torch
 from torch.nn import functional as F
 from torch import nn
+from torch.cuda.amp import autocast
 
 from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive, adafocal
 from Losses.loss import mmce, mmce_weighted
@@ -30,7 +31,8 @@ def train_single_epoch(epoch,
                        loss_function='cross_entropy',
                        gamma=1.0,
                        lamda=1.0,
-                       loss_mean=False):
+                       loss_mean=False,
+                       scaler=None):
     '''
     Util method for training a model for a single epoch.
     '''
@@ -44,19 +46,37 @@ def train_single_epoch(epoch,
 
         optimizer.zero_grad()
 
-        logits = model(data)
-        if ('mmce' in loss_function):
-            loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+        if scaler is not None: # use mixed precision training
+            with autocast():
+                logits = model(data)
+                if ('mmce' in loss_function):
+                    loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+                else:
+                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
+
+                if loss_mean:
+                    loss = loss / len(data)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer) # this is to perform the gradient clipping in the original scale!
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
+            scaler.step(optimizer)
+            scaler.update()
+            train_loss += loss.item()
         else:
-            loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
+            logits = model(data)
+            if ('mmce' in loss_function):
+                loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+            else:
+                loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
 
-        if loss_mean:
-            loss = loss / len(data)
+            if loss_mean:
+                loss = loss / len(data)
 
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
-        train_loss += loss.item()
-        optimizer.step()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 2)
+            train_loss += loss.item()
+            optimizer.step()
+
         num_samples += len(data)
 
         if batch_idx % log_interval == 0:
@@ -77,7 +97,8 @@ def test_single_epoch(epoch,
                       device,
                       loss_function='cross_entropy',
                       gamma=1.0,
-                      lamda=1.0):
+                      lamda=1.0,
+                      use_amp=False):
     '''
     Util method for testing a model for a single epoch.
     '''
@@ -89,11 +110,19 @@ def test_single_epoch(epoch,
             data = data.to(device)
             labels = labels.to(device)
 
-            logits = model(data)
-            if ('mmce' in loss_function):
-                loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+            if use_amp: # use mixed precision training
+                with autocast():
+                    logits = model(data)
+                    if ('mmce' in loss_function):
+                        loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                    else:
+                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
             else:
-                loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
+                logits = model(data)
+                if ('mmce' in loss_function):
+                    loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                else:
+                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
             num_samples += len(data)
 
     print('======> Test set loss: {:.4f}'.format(

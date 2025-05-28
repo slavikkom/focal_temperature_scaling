@@ -16,6 +16,8 @@ conda env create --name focal_scaling --file environment.yml
 conda activate focal_scaling
 ```
 
+In order to enable automatic mixed precision (AMP) training, use `environment_amp.yml` instead.
+
 Setup the imagenet dataset using the following commands:
 ```
 wget http://cs231n.stanford.edu/tiny-imagenet-200.zip 
