@@ -158,6 +158,13 @@ if __name__ == "__main__":
     # Taking input for the dataset
     num_classes = dataset_num_classes[dataset]
     if (args.dataset == 'tiny_imagenet'):
+        train_loader = dataset_loader[args.dataset].get_data_loader(
+            root=args.dataset_root,
+            split='train',
+            batch_size=args.test_batch_size,
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
+
         val_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='val',
@@ -172,7 +179,7 @@ if __name__ == "__main__":
             pin_memory=args.gpu,
             smoke_test=args.smoke_test)
     else:
-        _, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
+        train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=args.train_batch_size,
             augment=args.data_aug,
             random_seed=1,
@@ -239,9 +246,14 @@ if __name__ == "__main__":
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
     
+    train_logits, train_labels = get_logits_labels(train_loader, net, device=device)
     val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
     test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
-    stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels, num_classes=num_classes, device=device)
+    stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels,
+                                          num_classes=num_classes, device=device,
+                                          train_logits=train_logits,
+                                          train_labels=train_labels,
+                                          trainLoader=train_loader)
 
     # Ensure the save directory exists
     if not os.path.exists(args.save_eval_loc):
