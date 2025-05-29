@@ -1,0 +1,16 @@
+name: environment
+channels:
+    - pytorch
+    - nvidia
+    - defaults
+dependencies:
+    - python=3.9.18
+    - pytorch=1.9.1
+    - torchvision=0.10.1
+    - cudatoolkit=11.1
+    - tqdm
+    - numpy=1.21
+    - scipy
+    - matplotlib
+    - seaborn
+    - scikit-learn

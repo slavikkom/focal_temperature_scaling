@@ -133,7 +133,7 @@ def test_classification_net_logits(logits, labels):
         predictions_list, confidence_vals_list
 
 
-def test_classification_net(model, data_loader, device):
+def test_classification_net(model, data_loader, device, use_amp=False):
     '''
     This function reports classification accuracy and confusion matrix over a dataset.
     '''
@@ -146,10 +146,13 @@ def test_classification_net(model, data_loader, device):
             data = data.to(device)
             label = label.to(device)
 
-            logits = model(data)
+            if use_amp: # use mixed precision training
+                with torch.cuda.amp.autocast():
+                    logits = model(data)
+            else:   # no mixed precision training
+                logits = model(data)
             softmax = F.softmax(logits, dim=1)
             confidence_vals, predictions = torch.max(softmax, dim=1)
-
             labels_list.extend(label.cpu().numpy().tolist())
             predictions_list.extend(predictions.cpu().numpy().tolist())
             confidence_vals_list.extend(confidence_vals.cpu().numpy().tolist())
