@@ -56,6 +56,7 @@ def parseArgs():
     dataset_root = './'
     model = 'resnet50'
     save_loc = './'
+    save_eval_loc = './'
     saved_model_name = 'resnet50_cross_entropy_350.model'
     num_bins = 15
     model_name = None
@@ -77,6 +78,9 @@ def parseArgs():
     parser.add_argument("--save-path", type=str, default=save_loc,
                         dest="save_loc",
                         help='Path to import the model')
+    parser.add_argument("--save-eval-path", type=str, default=save_eval_loc,
+                        dest="save_eval_loc",
+                        help='Path to save evaluations of the model')
     parser.add_argument("--saved_model_name", type=str, default=saved_model_name,
                         dest="saved_model_name", help="file name of the pre-trained model")
     parser.add_argument("--num-bins", type=int, default=num_bins, dest="num_bins",
@@ -146,6 +150,7 @@ if __name__ == "__main__":
     dataset_root = args.dataset_root
     model_name = args.model_name
     save_loc = args.save_loc
+    save_eval_loc = args.save_eval_loc
     saved_model_name = args.saved_model_name
     num_bins = args.num_bins
     cross_validation_error = args.cross_validation_error
@@ -237,9 +242,14 @@ if __name__ == "__main__":
     val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
     test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
     stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels, num_classes=num_classes, device=device)
-    
+
+    # Ensure the save directory exists
+    if not os.path.exists(args.save_eval_loc):
+        os.makedirs(args.save_eval_loc)
+
     saved_stats_name = "_".join(saved_model_name.split(".m")[0].split("_")[-5:])
-    with open(saved_stats_name + ".json", 'w') as f:
+    save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
+    with open(save_stats_path + ".json", 'w') as f:
         json.dump(stats, f)
 
     res_str += '&{:.4f}({:.2f})&{:.4f}&{:.4f}&{:.4f}'.format(nll,  T_opt,  ece,  adaece, cece)
