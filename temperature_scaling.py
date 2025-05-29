@@ -57,6 +57,8 @@ class ModelWithTemperature(nn.Module):
         super(ModelWithTemperature, self).__init__()
         self.model = model
         self.temperature = 1.0
+        self.temperature_ece = 1.0
+        self.temperature_nll = 1.0
         self.log = log
         self.gamma = gamma
         self.softmax = softmax
@@ -157,6 +159,9 @@ class ModelWithTemperature(nn.Module):
             self.temperature = T_opt_ece
         else:
             self.temperature = T_opt_nll
+        self.temperature_ece = T_opt_ece
+        self.temperature_nll = T_opt_nll
+
         self.to(device)
 
         # Calculate NLL and ECE after temperature scaling
@@ -176,5 +181,10 @@ class ModelWithTemperature(nn.Module):
         return self
 
 
-    def get_temperature(self):
-        return self.temperature
+    def get_temperature(self, metric=None):
+        if metric is None:
+            return self.temperature
+        elif metric == 'ce':
+            return self.temperature_nll
+        elif metric == 'ece':
+            return self.temperature_ece

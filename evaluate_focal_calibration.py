@@ -46,40 +46,63 @@ def get_probs(logits, T=1, a=1, softmax=False):
     
     return probs
 
-def focal_calibration_evaluation(net, valLoader, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda'):
-    evaluation_metrics = {'val': {'calibrated': {},
-     'uncalibrated': {}},
-        'test': {'calibrated': {}, 'uncalibrated': {}}}
+def focal_calibration_evaluation(net, valLoader, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None, trainLoader=None):
+    calib_states = ('calibrated', 'uncalibrated')
+    datasets = ['val', 'test']
+    if train_logits is not None:
+        datasets.insert(0, 'train')   # now ['train','val','test']
+
+    evaluation_metrics = {
+        phase: { state: {} for state in calib_states }
+        for phase in datasets
+    }
+
 
     gamma_dict = {}
     
-    for T_criteria in ['ce', 'ece']:
-        for data_set in ['val', 'test']:
-            evaluation_metrics[data_set]['calibrated'][T_criteria] = {}
-        for g_counter, gamma in enumerate(gamma_link_list):
-    
-            scaled_model = ModelWithTemperature(net, gamma=gamma, softmax=int(gamma>50))
-            scaled_model.set_temperature(valLoader, cross_validate=T_criteria, device=device)
-            T_opt = scaled_model.get_temperature()
+    for data_set in datasets:
+        for T_metric in ['ce', 'ece']:
+            evaluation_metrics[data_set]['calibrated'][T_metric] = {}
+
+    for g_counter, gamma in enumerate(gamma_link_list):
+
+        scaled_model = ModelWithTemperature(net, gamma=gamma, softmax=int(gamma>50))
+        scaled_model.set_temperature(valLoader, cross_validate='ece', device=device)
+        T_opt_ce = scaled_model.get_temperature(metric='ce')
+        T_opt_ece = scaled_model.get_temperature(metric='ece')
+        
+        gamma_dict[str(round(gamma, 2)) + "_CE"] = scaled_model.nll_vals
+        gamma_dict[str(round(gamma, 2)) + "_ECE"] = scaled_model.ece_vals
+
+        ### First uncalibrated
+        val_pred = get_probs(val_logits, T=1, a=gamma, softmax=int(gamma>50))
+        evaluation_metrics['val']['uncalibrated'][str(round(gamma, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
+        test_pred = get_probs(test_logits, T=1, a=gamma, softmax=int(gamma>50))
+        evaluation_metrics['test']['uncalibrated'][str(round(gamma, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
             
-            gamma_dict[str(round(gamma, 2)) + "_CE"] = scaled_model.nll_vals
-            gamma_dict[str(round(gamma, 2)) + "_ECE"] = scaled_model.ece_vals
+        if train_labels is not None:
+            train_pred = get_probs(train_logits, T=1, a=gamma, softmax=int(gamma>50))
+            evaluation_metrics['train']['uncalibrated'][str(round(gamma, 2))] = evaluate(train_labels, train_pred, num_classes=num_classes)
+        
+            scaled_model = ModelWithTemperature(net, gamma=gamma, softmax=int(gamma>50))
+            scaled_model.set_temperature(trainLoader, cross_validate='ece', device=device)
 
-            ### First uncalibrated
-            if T_criteria == 'ce':
+            for T_metric in ['ce', 'ece']:
+                train_T_opt = scaled_model.get_temperature(metric=T_metric)
 
-                val_pred = get_probs(val_logits, T=1, a=gamma, softmax=int(gamma>50))
-                evaluation_metrics['val']['uncalibrated'][str(round(gamma, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
-                test_pred = get_probs(test_logits, T=1, a=gamma, softmax=int(gamma>50))
-                evaluation_metrics['test']['uncalibrated'][str(round(gamma, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
+                train_pred = get_probs(train_logits, T=train_T_opt, a=gamma, softmax=int(gamma>50))
+                evaluation_metrics['train']['calibrated'][T_metric][str(round(gamma, 2))] = evaluate(train_labels, train_pred, num_classes=num_classes)
 
+        for T_metric in ['ce', 'ece']:
+            T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
             val_pred = get_probs(val_logits, T=T_opt, a=gamma, softmax=int(gamma>50))
-            evaluation_metrics['val']['calibrated'][T_criteria][str(round(gamma, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
+            evaluation_metrics['val']['calibrated'][T_metric][str(round(gamma, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
             
             test_pred = get_probs(test_logits, T=T_opt, a=gamma, softmax=int(gamma>50))
-            evaluation_metrics['test']['calibrated'][T_criteria][str(round(gamma, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
-            
-            gamma_dict[str(round(gamma, 2)) + " T_opt" + " " + T_criteria] = T_opt
+            evaluation_metrics['test']['calibrated'][T_metric][str(round(gamma, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
+        
+        for T_metric in ['ce', 'ece']:
+            gamma_dict[str(round(gamma, 2)) + " T_opt" + " " + T_metric] = T_opt_ce if T_metric == 'ce' else T_opt_ece
     
     evaluation_metrics['T_dict'] = gamma_dict
     return evaluation_metrics
