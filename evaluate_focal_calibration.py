@@ -7,7 +7,7 @@ from temperature_scaling import ModelWithTemperature
 from Metrics.metrics import AdaptiveECELoss
 from temperature_scaling import multi_focal_link
 
-gamma_link_list = [-1, -0.75, -0.5,-0.25, 0, 0.25, 0.5, 0.75, 1, 3, 5, 100]
+gamma_link_list = [0.25, 0.5, 0.75, 1, 2, 3, 5, 100] # -1, -0.75, -0.5,-0.25, 0, 
 
 def multi_acc(y_pred, y_test):
     y_pred = torch.argmax(y_pred, dim = 1)    
