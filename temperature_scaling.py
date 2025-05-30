@@ -38,7 +38,7 @@ def multi_focal_link(x, a=2):
 
     overflowed_max_indices = torch.argmax(x, dim=1).unsqueeze(1)
 
-    overflowed_rows_indices = torch.nonzero(overflowed_rows_indices).squeeze()
+    overflowed_rows_indices = torch.nonzero(overflowed_rows_indices, as_tuple=False).squeeze()
 
     p[overflowed_rows_indices] = 1e-5/nr_classes
     p[overflowed_rows_indices, overflowed_max_indices] = 1-1e-5
