@@ -5,7 +5,8 @@ Script for training models.
 from torch import optim
 import torch
 import torch.utils.data
-from torch.cuda.amp import GradScaler
+if torch.__version__ >= '1.6.0':
+    from torch.cuda.amp import GradScaler
 import argparse
 import torch.backends.cudnn as cudnn
 import random

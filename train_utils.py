@@ -5,8 +5,8 @@ This module contains methods for training models with different loss functions.
 import torch
 from torch.nn import functional as F
 from torch import nn
-from torch.cuda.amp import autocast
-
+if torch.__version__ >= '1.6.0':
+    from torch.cuda.amp import autocast
 from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive, adafocal
 from Losses.loss import mmce, mmce_weighted
 from Losses.loss import brier_score
