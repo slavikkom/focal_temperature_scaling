@@ -336,7 +336,7 @@ if __name__ == "__main__":
                                      lamda=args.lamda)
         test_loss = test_single_epoch(epoch,
                                       net,
-                                      val_loader,
+                                      test_loader,
                                       device,
                                       loss_function=args.loss_function,
                                       gamma=gamma,
