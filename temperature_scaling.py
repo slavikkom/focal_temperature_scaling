@@ -14,18 +14,37 @@ def focal_link(x, a=2): # a - gamma of focal loss
     p = nominator / denominator
     return nominator
 
+"""
 def focal_derivative(p, gamma=2):
     p = torch.clamp(p, min=1e-12, max=1-1e-12)
     return (1 - p)**gamma * (gamma * torch.log(p) / (1 - p) - 1 / p)
+"""
+def focal_derivative(p, gamma=2):
+    eps = 1e-12
+    p = p.clamp(min=eps, max=1.0 - eps)
+    one_minus_p = 1.0 - p
 
+    # gamma * log(p) / (1-p)
+    term1 = gamma * torch.log(p).div(one_minus_p)
+    # 1/p
+    term2 = p.reciprocal()
+    return (one_minus_p ** gamma) * (term1 - term2)
+"""
 def focal_map(q, gamma=2):
     inverse_grad = 1 / focal_derivative(q, gamma=gamma)
     p = inverse_grad / torch.sum(inverse_grad, dim=-1, keepdim=True)
     return p
+"""
+def focal_map(q, gamma=2):
+    der = focal_derivative(q, gamma)      # shape = [batch, classes]
+    inv  = der.reciprocal()              # same as 1/der, but sometimes clearer to read
+    row_sum = inv.sum(dim=-1, keepdim=True)
+    p = inv.div(row_sum)                  # normalize so each row sums to 1
+    return p
 
-def check_overflow(tensor_x):
-    return (tensor_x > torch.finfo(tensor_x.dtype).min) & (tensor_x < torch.finfo(tensor_x.dtype).max)
-
+#def check_overflow(tensor_x):
+#    return (tensor_x > torch.finfo(tensor_x.dtype).min) & (tensor_x < torch.finfo(tensor_x.dtype).max)
+"""
 def multi_focal_link(x, a=2):
     q = F.softmax(x, dim=-1)
     p = focal_map(q, gamma=a)
@@ -43,6 +62,48 @@ def multi_focal_link(x, a=2):
     p[overflowed_rows_indices] = 1e-5/nr_classes
     p[overflowed_rows_indices, overflowed_max_indices] = 1-1e-5
     return p
+"""
+def multi_focal_link(x, a=2):
+    # 1) compute q = softmax(x), shape = [batch, n_classes]
+    q = F.softmax(x, dim=-1)
+
+    # 2) focal_map → p, shape [batch, n_classes]
+    p = focal_map(q, gamma=a)
+
+    # 3) find any non-finite entries (NaN or ±Inf)
+    #    Note: torch.isfinite(p) is a [batch, n_classes] boolean
+    #    (True for finite entries). We want rows with ANY non-finite.
+    mask_rows = (~p.isfinite()).any(dim=1)       # [batch] boolean
+
+    if mask_rows.any():
+        # 4) identify those row indices
+        rows = mask_rows.nonzero(as_tuple=True)[0]  # 1D LongTensor of size [K]
+
+        # 5) find which class has the max logit for each row
+        max_indices = torch.argmax(x, dim=1)         # [batch]
+        max_for_rows = max_indices[rows]             # [K]
+
+        # 6a) Set every entry in those rows to a small uniform value
+        nr_classes = p.size(1)
+        tiny_val = 1e-5            # total “mass” we’ll give to the off‐max terms
+        other_val = tiny_val / (nr_classes - 1)
+
+        # Assign “other_val” to every column
+        p[rows.unsqueeze(1), torch.arange(nr_classes, device=x.device)] = other_val
+
+        # 6b) At the max‐logit column, give it (1 - tiny_val)
+        p[rows, max_for_rows] = 1.0 - tiny_val
+        # → Now each row sums to exactly 1
+    return p
+
+def apply_link(logits, link='softmax', a=1):
+    if link == 'softmax':
+        probs = torch.nn.Softmax(dim=1)(logits)
+    elif link == 'focal':
+        probs = multi_focal_link(logits, a)
+        eps = 1e-12
+        probs = probs.clamp(min=eps, max=1.0)
+    return probs
 
 
 class ModelWithTemperature(nn.Module):
@@ -53,15 +114,15 @@ class ModelWithTemperature(nn.Module):
         NB: Output of the neural network should be the classification logits,
             NOT the softmax (or log softmax)!
     """
-    def __init__(self, model, log=True, gamma=1, softmax=True):
+    def __init__(self, model, log=True, a=1, link='softmax'):
         super(ModelWithTemperature, self).__init__()
         self.model = model
         self.temperature = 1.0
         self.temperature_ece = 1.0
         self.temperature_nll = 1.0
         self.log = log
-        self.gamma = gamma
-        self.softmax = softmax
+        self.a = a
+        self.link = link
 
 
     def forward(self, input):
@@ -78,7 +139,7 @@ class ModelWithTemperature(nn.Module):
 
 
     def set_temperature(self,
-                        valid_loader,
+                        logits, labels,
                         cross_validate='ce',
                         device='cuda'):
         """
@@ -90,36 +151,17 @@ class ModelWithTemperature(nn.Module):
         nll_criterion = nn.NLLLoss().to(device)
         ece_criterion = AdaptiveECELoss().to(device)
 
-        # First: collect all the logits and labels for the validation set
-        logits_list = []
-        labels_list = []
-        with torch.no_grad():
-            for input, label in valid_loader:
-                input = input.to(device)
-                logits = self.model(input)
-                logits_list.append(logits)
-                labels_list.append(label)
-
-            logits = torch.cat(logits_list).to(device)
-            labels = torch.cat(labels_list).to(device)
-
         # Calculate NLL and ECE before temperature scaling
-        print("Current gamma is ", self.gamma)
-        probs = None
-        if self.softmax:
-            probs = torch.nn.Softmax(dim=1)(logits)
-        else:
-            probs = multi_focal_link(logits, self.gamma)
-        eps = 1e-12
-        probs = probs.clamp(min=eps, max=1.0)
+        print("Current parameter is ", self.a)
+        probs = apply_link(logits, link=self.link, a=self.a)
         
         before_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
         before_temperature_ece = ece_criterion(probs, labels).item()
         if self.log:
             print('Before temperature - NLL: %.3f, ECE: %.3f' % (before_temperature_nll, before_temperature_ece))
 
-        nll_val = 10 ** 7
-        ece_val = 10 ** 7
+        nll_val = before_temperature_nll
+        ece_val = before_temperature_ece
         
         self.nll_vals = []
         self.ece_vals = []
@@ -134,11 +176,7 @@ class ModelWithTemperature(nn.Module):
             self.to(device)
             probs = None
             
-            if self.softmax:
-                probs = torch.nn.Softmax(dim=1)(logits / T)
-            else:
-                probs = multi_focal_link(logits / T, self.gamma)
-            probs = probs.clamp(min=eps, max=1.0)
+            probs = apply_link(logits / T, link=self.link, a=self.a)
 
             after_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
             after_temperature_ece = ece_criterion(probs, labels).item()
@@ -165,12 +203,7 @@ class ModelWithTemperature(nn.Module):
         self.to(device)
 
         # Calculate NLL and ECE after temperature scaling
-        probs = None
-        if self.softmax:
-            probs = torch.nn.Softmax(dim=1)(logits / T)
-        else:
-            probs = multi_focal_link(logits / T, self.gamma)
-        probs = probs.clamp(min=eps, max=1.0)
+        probs = apply_link(logits, link=self.link, a=self.a)
 
         after_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
         after_temperature_ece = ece_criterion(probs, labels).item()
