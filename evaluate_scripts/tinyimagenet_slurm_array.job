@@ -1,0 +1,86 @@
+#!/bin/bash
+#SBATCH --job-name=eval_ti
+#SBATCH --output=slurm_logs_tinyimagenet/eval_job_%A_%a.out
+#SBATCH --array=0-7
+#SBATCH --partition=gpu
+#SBATCH --nodelist=falcon4,falcon5,falcon6,pegasus,pegasus2
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=00:10:00
+#SBATCH --mem=20G
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --mail-type=ALL
+
+# Environment setup (modify if needed)
+conda init
+conda activate focal_scaling
+
+# Paths and settings
+SAVE_PATH="../MODEL_DIRECTORY/TINYIMAGENET/"
+SAVE_EVAL_PATH="./TINYIMAGENET_epoch100/"
+MODEL_EPOCH=100
+SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
+GPU_FLAG="-g" # run on gpu or not. If not set it to empty string ""
+
+# Use epoch=1 for smoke test
+if [ "$SMOKE_ARG" != "" ]; then
+    MODEL_EPOCH=1
+fi
+
+mkdir -p $SAVE_EVAL_PATH
+
+# Job arguments per index
+case $SLURM_ARRAY_TASK_ID in
+  0)
+    MODEL_NAME="resnet50_ti_cross_entropy_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="ce.txt"
+    ;;
+  1)
+    MODEL_NAME="resnet50_ti_focal_loss_gamma_1.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="focal1.txt"
+    ;;
+  2)
+    MODEL_NAME="resnet50_ti_focal_loss_gamma_2.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="focal2.txt"
+    ;;
+  3)
+    MODEL_NAME="resnet50_ti_focal_loss_gamma_3.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="focal3.txt"
+    ;;
+  4)
+    MODEL_NAME="resnet50_ti_focal_loss_gamma_5.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="focal5.txt"
+    ;;
+  5)
+    MODEL_NAME="resnet50_ti_focal_loss_gamma_7.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="focal7.txt"
+    ;;
+  6)
+    MODEL_NAME="resnet50_ti_focal_loss_adaptive_gamma_3.0_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="FLSD.txt"
+    ;;
+  7)
+    MODEL_NAME="resnet50_ti_adafocal_${MODEL_EPOCH}.model"
+    OUTPUT_FILE="adafocal.txt"
+    ;;
+  *)
+    echo "Invalid array index $SLURM_ARRAY_TASK_ID"
+    exit 1
+    ;;
+esac
+
+# Run evaluation
+python ../evaluate.py \
+  --dataset tiny_imagenet \
+  --dataset-root ../TINY_IMAGENET_DIRECTORY \
+  --model resnet50_ti \
+  -log \
+  $GPU_FLAG \
+  $SMOKE_ARG \
+  --save-path $SAVE_PATH \
+  --save-eval-path $SAVE_EVAL_PATH \
+  --saved_model_name $MODEL_NAME \
+  >> "$SAVE_EVAL_PATH/$OUTPUT_FILE"
+
+

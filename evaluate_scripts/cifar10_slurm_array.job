@@ -1,15 +1,15 @@
 #!/bin/bash
-#SBATCH --job-name=eval_cifar10
-#SBATCH --output=slurm_logs/eval_job_%A_%a.out
+#SBATCH --job-name=eval_cf10
+#SBATCH --output=slurm_logs_cifar10/eval_job_%A_%a.out
 #SBATCH --array=0-7
 #SBATCH --partition=gpu
-#SBATCH --nodelist=falcon4,falcon5,falcon6,pegasus,pegasus2
+#SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=00:20:00
+#SBATCH --time=00:10:00
 #SBATCH --mem=20G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=10
+#SBATCH --cpus-per-task=4
 #SBATCH --mail-type=ALL
 
 # Environment setup (modify if needed)
@@ -22,10 +22,10 @@ conda activate focal_scaling
 
 # Paths and settings
 SAVE_PATH="../MODEL_DIRECTORY/CIFAR10/"
-SAVE_EVAL_PATH="./CIFAR10/"
+SAVE_EVAL_PATH="./CIFAR10_epoch350/"
 MODEL_EPOCH=350
-SMOKE_ARG=""
-GPU_FLAG="-g"
+SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
+GPU_FLAG="-g" # run on gpu or not. If not set it to empty string ""
 
 # Use epoch=1 for smoke test
 if [ "$SMOKE_ARG" != "" ]; then
@@ -35,6 +35,46 @@ fi
 mkdir -p $SAVE_EVAL_PATH
 
 # Job arguments per index
+# case $SLURM_ARRAY_TASK_ID in
+#   0)
+#     MODEL_NAME="resnet50_cross_entropy_best_346.model"
+#     OUTPUT_FILE="ce.txt"
+#     ;;
+#   1)
+#     MODEL_NAME="resnet50_focal_loss_gamma_1.0_best_322.model"
+#     OUTPUT_FILE="focal1.txt"
+#     ;;
+#   2)
+#     MODEL_NAME="resnet50_focal_loss_gamma_2.0_best_344.model"
+#     OUTPUT_FILE="focal2.txt"
+#     ;;
+#   3)
+#     MODEL_NAME="resnet50_focal_loss_gamma_3.0_best_307.model"
+#     OUTPUT_FILE="focal3.txt"
+#     ;;
+#   4)
+#     MODEL_NAME="resnet50_focal_loss_gamma_5.0_best_335.model"
+#     OUTPUT_FILE="focal5.txt"
+#     ;;
+#   5)
+#     MODEL_NAME="resnet50_focal_loss_gamma_7.0_best_315.model"
+#     OUTPUT_FILE="focal7.txt"
+#     ;;
+#   6)
+#     MODEL_NAME="resnet50_focal_loss_adaptive_gamma_3.0_best_326.model"
+#     OUTPUT_FILE="FLSD.txt"
+#     ;;
+#   7)
+#     MODEL_NAME="resnet50_adafocal_best_308.model"
+#     OUTPUT_FILE="adafocal.txt"
+#     ;;
+#   *)
+#     echo "Invalid array index $SLURM_ARRAY_TASK_ID"
+#     exit 1
+#     ;;
+# esac
+
+# Epoch 350
 case $SLURM_ARRAY_TASK_ID in
   0)
     MODEL_NAME="resnet50_cross_entropy_${MODEL_EPOCH}.model"
@@ -74,13 +114,12 @@ case $SLURM_ARRAY_TASK_ID in
     ;;
 esac
 
+
 # Run evaluation
 python ../evaluate.py \
   --dataset cifar10 \
   --model resnet50 \
   -log \
-  -b 128 \
-  -tb 128 \
   $GPU_FLAG \
   $SMOKE_ARG \
   --save-path $SAVE_PATH \
