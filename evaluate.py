@@ -215,13 +215,15 @@ if __name__ == "__main__":
     adaece_criterion = AdaptiveECELoss().to(device)
     cece_criterion = ClasswiseECELoss().to(device)
 
-    logits, labels = get_logits_labels(test_loader, net, device)
-    conf_matrix, p_accuracy, _, _, _ = test_classification_net_logits(logits, labels)
+    train_logits, train_labels = get_logits_labels(train_loader, net, device=device)
+    val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
+    test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
+    conf_matrix, p_accuracy, _, _, _ = test_classification_net_logits(test_logits, test_labels)
 
-    p_ece = ece_criterion(logits, labels).item()
-    p_adaece = adaece_criterion(logits, labels).item()
-    p_cece = cece_criterion(logits, labels).item()
-    p_nll = nll_criterion(logits, labels).item()
+    p_ece = ece_criterion(test_logits, test_labels).item()
+    p_adaece = adaece_criterion(test_logits, test_labels).item()
+    p_cece = cece_criterion(test_logits, test_labels).item()
+    p_nll = nll_criterion(test_logits, test_labels).item()
 
     res_str = '{:s}&{:.4f}&{:.4f}&{:.4f}&{:.4f}&{:.4f}'.format(saved_model_name,  1-p_accuracy,  p_nll,  p_ece,  p_adaece, p_cece)
 
@@ -236,7 +238,7 @@ if __name__ == "__main__":
 
 
     scaled_model = ModelWithTemperature(net, args.log)
-    scaled_model.set_temperature(val_loader, cross_validate=cross_validation_error, device=device)
+    scaled_model.set_temperature(val_logits, val_labels, cross_validate=cross_validation_error, device=device)
     T_opt = scaled_model.get_temperature()
     logits, labels = get_logits_labels(test_loader, scaled_model, device=device)
     conf_matrix, accuracy, _, _, _ = test_classification_net_logits(logits, labels)
@@ -246,14 +248,10 @@ if __name__ == "__main__":
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
     
-    train_logits, train_labels = get_logits_labels(train_loader, net, device=device)
-    val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
-    test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
-    stats = focal_calibration_evaluation(net, val_loader, val_logits, val_labels, test_logits, test_labels,
+    stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
                                           num_classes=num_classes, device=device,
                                           train_logits=train_logits,
-                                          train_labels=train_labels,
-                                          trainLoader=train_loader)
+                                          train_labels=train_labels)
 
     # Ensure the save directory exists
     if not os.path.exists(args.save_eval_loc):
