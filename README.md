@@ -22,7 +22,7 @@ Setup the imagenet dataset using the following commands:
 ```
 wget http://cs231n.stanford.edu/tiny-imagenet-200.zip 
 
-unzip tiny-imagenet-200.zip "tiny-imagenet-200/*" -d ../TINY_IMAGENET_DIRECTORY && mv ../TINY_IMAGENET_DIRECTORY/tiny-imagenet-200/* ../TINY_IMAGENET_DIRECTORY/ && rmdir ../TINY_IMAGENET_DIRECTORY/tiny-imagenet-200
+unzip tiny-imagenet-200.zip "tiny-imagenet-200/*" -d ./TINY_IMAGENET_DIRECTORY && mv ./TINY_IMAGENET_DIRECTORY/tiny-imagenet-200/* ./TINY_IMAGENET_DIRECTORY/ && rmdir ./TINY_IMAGENET_DIRECTORY/tiny-imagenet-200
 ```
 
 # Training:
