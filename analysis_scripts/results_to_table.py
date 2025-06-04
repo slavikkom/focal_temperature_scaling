@@ -5,8 +5,10 @@ import os
 from results_parser import evaluation_metrics_to_dataframe
 
 
-dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-RESULTS_DIR = f'./hpc_results/{dataset_name}_epoch350'
+dataset_name = 'CIFAR100' # 'CIFAR100', 'TINYIMAGENET' 
+FP_str = "_FP32"
+FP_str = "" # FP16
+RESULTS_DIR = f'../RESULTS/hpc_results/{dataset_name}_epoch350{FP_str}'
 
 file_names =[
             'resnet50_cross_entropy_350.json',
@@ -32,6 +34,7 @@ method_names = [
 
 base_link_name = 'softmax'
 include_train_performance = True # if True, include train performance in the table
+uncalibrated_results = True
 
 df_paper = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Log-Loss', 'ECE'])
 
@@ -42,66 +45,88 @@ for file_name, base_method in zip(file_names, method_names):
 
     df = evaluation_metrics_to_dataframe(data)
 
-    df_slice_tr_ce = df.loc[(df.dataset ==  'train') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ce')]
-    df_slice_tr_ece = df.loc[(df.dataset == 'train') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')]
-    df_slice_te_ce = df.loc[(df.dataset == 'test') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ce')]
-    df_slice_te_ece = df.loc[(df.dataset == 'test') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')]
+    if uncalibrated_results:
+        df_slice_tr_ce = df.loc[(df.dataset ==  'train') & (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')]
+        df_slice_tr_ece = df.loc[(df.dataset == 'train') & (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')]
+        df_slice_val_ce = df.loc[(df.dataset == 'val') & (df.calibration ==   'uncalibrated') & (df.cal_criteria == 'None')]
+        df_slice_val_ece = df.loc[(df.dataset == 'val') & (df.calibration ==  'uncalibrated') & (df.cal_criteria == 'None')]
+        df_slice_te_ce = df.loc[(df.dataset == 'test') & (df.calibration ==   'uncalibrated') & (df.cal_criteria == 'None')]
+        df_slice_te_ece = df.loc[(df.dataset == 'test') & (df.calibration ==  'uncalibrated') & (df.cal_criteria == 'None')]
+    else:
+        df_slice_tr_ce = df.loc[(df.dataset ==  'train') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ce')]
+        df_slice_tr_ece = df.loc[(df.dataset == 'train') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')]
+        df_slice_val_ce = df.loc[(df.dataset ==  'val') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ce')]
+        df_slice_val_ece = df.loc[(df.dataset == 'val') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')]
+        df_slice_te_ce = df.loc[(df.dataset == 'test') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ce')]
+        df_slice_te_ece = df.loc[(df.dataset == 'test') & (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')]
 
     lowest_ce_idx_tr = df_slice_tr_ce.query("link_name != 'softmax'")['CE'].idxmin()
-    lowest_ece_idx_tr = df_slice_tr_ece.query("link_name != 'softmax'")['ECE'].idxmin()
+    lowest_ce_idx_val = df_slice_val_ce.query("link_name != 'softmax'")['CE'].idxmin()
     lowest_ce_idx_te = df_slice_te_ce.query("link_name != 'softmax'")['CE'].idxmin()
+    lowest_ece_idx_tr = df_slice_tr_ece.query("link_name != 'softmax'")['ECE'].idxmin()
+    lowest_ece_idx_val = df_slice_val_ece.query("link_name != 'softmax'")['ECE'].idxmin()
     lowest_ece_idx_te = df_slice_te_ece.query("link_name != 'softmax'")['ECE'].idxmin()
 
-    # base metrics
+    # Base metrics: model calibrated via temperature scaling
+    # accuracy
     acc_b_tr = df_slice_tr_ce.ACC.iloc[0]
     acc_b_te =  df_slice_te_ce.ACC.iloc[0]
+    # cross-entropy
     ce_b_tr = df_slice_tr_ce.query(f"link_name == '{base_link_name}'").CE.values[0]
     ce_b_te = df_slice_te_ce.query(f"link_name == '{base_link_name}'").CE.values[0]
-    ce_topt_b_te = data['T_dict']['softmax']['1'][' T_opt ce']
+    # optimal temperature for CE based on validation set
+    ce_topt_b = data['T_dict']['softmax']['1'][' T_opt ce'] 
+    # expected calibration error (ECE)
     ece_b_tr = df_slice_tr_ece.query(f"link_name == '{base_link_name}'").ECE.values[0]
     ece_b_te = df_slice_te_ece.query(f"link_name == '{base_link_name}'").ECE.values[0]
-    ece_topt_b_te = data['T_dict']['softmax']['1'][' T_opt ece']
+    # optimal temperature for ECE based on validation set
+    ece_topt_b = data['T_dict']['softmax']['1'][' T_opt ece']
 
-    # metrics after focal temperature calibration
-    gamma = df_slice_te_ce.loc[lowest_ce_idx_te].link_value # according to CE on test
+    # Metrics for the model calibrated via focal temperature calibration
+    # gamma = df_slice_te_ece.loc[lowest_ece_idx_te].link_value # according to the ECE on test
+    gamma = df_slice_val_ece.loc[lowest_ece_idx_val].link_value # according to the ECE on val
+    gamma = int(gamma) if gamma.is_integer() else gamma # convert to int if possible
+    # accuracy
     acc_tr = df_slice_tr_ce.loc[lowest_ce_idx_tr].ACC 
     acc_te = df_slice_te_ce.loc[lowest_ce_idx_te].ACC
+    # ce
     ce_tr = df_slice_tr_ce.loc[lowest_ce_idx_tr].CE
     ce_te = df_slice_te_ce.loc[lowest_ce_idx_te].CE
-    ce_topt_te = data['T_dict']['focal'][str(gamma)][' T_opt ce']
+    ce_topt = data['T_dict']['focal'][str(gamma)][' T_opt ce']
+    # ece
     ece_tr = df_slice_tr_ece.loc[lowest_ece_idx_tr].ECE
     ece_te = df_slice_te_ece.loc[lowest_ece_idx_te].ECE
-    ece_topt_te = data['T_dict']['focal'][str(gamma)][' T_opt ece']
+    ece_topt = data['T_dict']['focal'][str(gamma)][' T_opt ece']
 
     if include_train_performance:
         # with train performance
         row_b = { # base metrics row
             'Approach': f'{base_method}',
             'Accuracy': f'{acc_b_tr:2.1f}/{acc_b_te:2.1f}',
-            'Log-Loss': f'{ce_b_tr:1.2f}/{ce_b_te:1.2f} ({ce_topt_b_te:1.2f})',
-            'ECE': f'{ece_b_tr*100:1.2f}/{ece_b_te*100:1.2f} ({ece_topt_b_te:1.2f})',
+            'Log-Loss': f'{ce_b_tr:1.2f}/{ce_b_te:1.2f} ({ce_topt_b:1.2f})',
+            'ECE': f'{ece_b_tr*100:1.2f}/{ece_b_te*100:1.2f} ({ece_topt_b:1.2f})',
         }
 
         row = { # after calibration metrics row
-            'Approach': f'$\\gamma={gamma}$',
+            'Approach': f'$+\\gamma_{{ev}}={gamma}$',
             'Accuracy': f'{acc_tr:2.1f}/{acc_te:2.1f}',
-            'Log-Loss': f'{ce_tr:1.2f}/{ce_te:1.2f} ({ce_topt_te:1.2f})',
-            'ECE': f'{ece_tr*100:1.2f}/{ece_te*100:1.2f} ({ece_topt_te:1.2f})',
+            'Log-Loss': f'{ce_tr:1.2f}/{ce_te:1.2f} ({ce_topt:1.2f})',
+            'ECE': f'{ece_tr*100:1.2f}/{ece_te*100:1.2f} ({ece_topt:1.2f})',
         }
     else:
         # without train performance
         row_b = { # base metrics row
             'Approach': f'{base_method}',
             'Accuracy': f'{acc_b_te:2.1f}',
-            'Log-Loss': f'{ce_b_te:1.2f} ({ce_topt_b_te:1.2f})',
-            'ECE': f'{ece_b_te*100:1.2f} ({ece_topt_b_te:1.2f})',
+            'Log-Loss': f'{ce_b_te:1.2f} ({ce_topt_b:1.2f})',
+            'ECE': f'{ece_b_te*100:1.2f} ({ece_topt_b:1.2f})',
         }
 
         row = { # after calibration metrics row
             'Approach': f'$+\\gamma_{{ev}}={gamma}$',
             'Accuracy': f'{acc_te:2.1f}',
-            'Log-Loss': f'{ce_te:1.2f} ({ce_topt_te:1.2f})',
-            'ECE': f'{ece_te*100:1.2f} ({ece_topt_te:1.2f})',
+            'Log-Loss': f'{ce_te:1.2f} ({ce_topt:1.2f})',
+            'ECE': f'{ece_te*100:1.2f} ({ece_topt:1.2f})',
         }
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b, row])], ignore_index=True)

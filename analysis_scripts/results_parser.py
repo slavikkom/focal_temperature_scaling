@@ -5,7 +5,7 @@ import numpy as np
 import os
 
 # %%
-RESULTS_DIR = './hpc_results/CIFAR10_epoch350'
+RESULTS_DIR = '../RESULTS/hpc_results/CIFAR10_epoch350'
 # RESULTS_DIR = './hpc_results/CIFAR100_epoch350'
 # RESULTS_DIR = './hpc_results/TINYIMAGENET_epoch350'
 # RESULTS_DIR = './hpc_results/TINYIMAGENET_epochBest'
