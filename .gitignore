@@ -8,3 +8,5 @@ evaluate_scripts/**/*.json
 evaluate_scripts/**/*.txt
 *.zip
 *.out
+
+RESULTS/
