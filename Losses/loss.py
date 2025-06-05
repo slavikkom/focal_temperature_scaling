@@ -13,6 +13,7 @@ from Losses.adafocal import AdaFocal
 from Losses.focal_loss_adaptive_gamma import FocalLossAdaptive
 from Losses.mmce import MMCE, MMCE_weighted
 from Losses.brier_score import BrierScore
+from Losses.new_losses import LinearDecayLoss, ExpPLoss, Exp1mpLoss, OneMinusPowerLoss, GeneralizedFocalLoss, LogPowerLoss
 
 
 def cross_entropy(logits, targets, **kwargs):
@@ -47,3 +48,83 @@ def brier_score(logits, targets, **kwargs):
 def adafocal(logits, targets, **kwargs):
     model = AdaFocal(device=kwargs['device'])
     return model(logits, targets)
+
+def linear_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for LinearDecayLoss:
+      f(p) = (1 − β p)(−log p), summed over the batch.
+    Expects:
+      kwargs['gamma']  → β
+      kwargs['device'] → torch device
+    """
+    beta = kwargs['gamma']
+    device = kwargs['device']
+    return LinearDecayLoss(beta=beta, reduction='sum').to(device)(logits, targets)
+
+
+def exp_p_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for ExpPLoss:
+      f(p) = exp(−α p)(−log p), summed over the batch.
+    Expects:
+      kwargs['gamma']  → α
+      kwargs['device'] → torch device
+    """
+    alpha = kwargs['gamma']
+    device = kwargs['device']
+    return ExpPLoss(alpha=alpha, reduction='sum').to(device)(logits, targets)
+
+
+def exp_1mp_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for Exp1mpLoss:
+      f(p) = exp(−α (1 − p))(−log p), summed over the batch.
+    Expects:
+      kwargs['gamma']  → α
+      kwargs['device'] → torch device
+    """
+    alpha = kwargs['gamma']
+    device = kwargs['device']
+    return Exp1mpLoss(alpha=alpha, reduction='sum').to(device)(logits, targets)
+
+
+def one_minus_power_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for OneMinusPowerLoss:
+      f(p) = (1 − p^β)(−log p), summed over the batch.
+    Expects:
+      kwargs['gamma']  → β
+      kwargs['device'] → torch device
+    """
+    beta = kwargs['gamma']
+    device = kwargs['device']
+    return OneMinusPowerLoss(beta=beta, reduction='sum').to(device)(logits, targets)
+
+
+def generalized_focal_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for GeneralizedFocalLoss:
+      f(p) = (1 − p^β)^γ (−log p), summed over the batch.
+    Expects:
+      kwargs['gamma2'] → β
+      kwargs['gamma3'] → γ
+      kwargs['device'] → torch device
+    """
+    beta = kwargs['beta']
+    gamma_ = kwargs['gamma']
+    device = kwargs['device']
+    return GeneralizedFocalLoss(beta=beta, gamma=gamma_, reduction='sum') \
+               .to(device)(logits, targets)
+
+
+def log_power_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for LogPowerLoss:
+      f(p) = (−log p)^κ (−log p) = (−log p)^(κ+1), summed over the batch.
+    Expects:
+      kwargs['gamma']  → κ
+      kwargs['device'] → torch device
+    """
+    kappa = kwargs['gamma']
+    device = kwargs['device']
+    return LogPowerLoss(kappa=kappa, reduction='sum').to(device)(logits, targets)

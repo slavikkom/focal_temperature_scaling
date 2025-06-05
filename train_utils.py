@@ -7,9 +7,10 @@ from torch.nn import functional as F
 from torch import nn
 if torch.__version__ >= '1.6.0':
     from torch.cuda.amp import autocast
-from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive, adafocal
-from Losses.loss import mmce, mmce_weighted
-from Losses.loss import brier_score
+#from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive, adafocal
+#from Losses.loss import mmce, mmce_weighted
+#from Losses.loss import brier_score
+from Losses.loss import *
 
 
 loss_function_dict = {
@@ -19,7 +20,14 @@ loss_function_dict = {
     'mmce': mmce,
     'adafocal': adafocal,
     'mmce_weighted': mmce_weighted,
-    'brier_score': brier_score
+    'brier_score': brier_score,
+    #### new losses ####
+    'linear':              lambda logits, targets, **kwargs: linear_loss_fn(logits, targets, **kwargs),
+    'exp_p':               lambda logits, targets, **kwargs: exp_p_loss_fn(logits, targets, **kwargs),
+    'exp_1mp':             lambda logits, targets, **kwargs: exp_1mp_loss_fn(logits, targets, **kwargs),
+    'one_minus_power':     lambda logits, targets, **kwargs: one_minus_power_loss_fn(logits, targets, **kwargs),
+    'generalized_focal':   lambda logits, targets, **kwargs: generalized_focal_loss_fn(logits, targets, **kwargs),
+    'log_power':           lambda logits, targets, **kwargs: log_power_loss_fn(logits, targets, **kwargs),
 }
 
 
@@ -32,7 +40,8 @@ def train_single_epoch(epoch,
                        gamma=1.0,
                        lamda=1.0,
                        loss_mean=False,
-                       scaler=None):
+                       scaler=None,
+                       beta=1.0):
     '''
     Util method for training a model for a single epoch.
     '''
@@ -51,6 +60,8 @@ def train_single_epoch(epoch,
                 logits = model(data)
                 if ('mmce' in loss_function):
                     loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+                elif ('generalized_focal' in loss_function):
+                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device)
                 else:
                     loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
 
@@ -98,7 +109,8 @@ def test_single_epoch(epoch,
                       loss_function='cross_entropy',
                       gamma=1.0,
                       lamda=1.0,
-                      use_amp=False):
+                      use_amp=False,
+                      beta=1.0):
     '''
     Util method for testing a model for a single epoch.
     '''
@@ -115,12 +127,16 @@ def test_single_epoch(epoch,
                     logits = model(data)
                     if ('mmce' in loss_function):
                         loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                    elif ('generalized_focal' in loss_function):
+                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device).item()
                     else:
                         loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
             else:
                 logits = model(data)
                 if ('mmce' in loss_function):
                     loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                elif ('generalized_focal' in loss_function):
+                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device).item()
                 else:
                     loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
             num_samples += len(data)

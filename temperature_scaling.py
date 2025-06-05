@@ -7,6 +7,7 @@ from torch import nn, optim
 from torch.nn import functional as F
 
 from Metrics.metrics import ECELoss, AdaptiveECELoss
+from new_links import linear_invlink, multi_link
 
 def focal_link(x, a=2): # a - gamma of focal loss
     nominator = a*torch.log(torch.exp(x)+1)+torch.exp(x)
@@ -101,6 +102,14 @@ def apply_link(logits, link='softmax', a=1):
         probs = torch.nn.Softmax(dim=1)(logits)
     elif link == 'focal':
         probs = multi_focal_link(logits, a)
+        eps = 1e-12
+        probs = probs.clamp(min=eps, max=1.0)
+    elif link == 'generalized_focal':
+        probs = multi_link(logits, link, a[0], a[1])
+        eps = 1e-12
+        probs = probs.clamp(min=eps, max=1.0)
+    else:
+        probs = multi_link(logits, link, a)
         eps = 1e-12
         probs = probs.clamp(min=eps, max=1.0)
     return probs

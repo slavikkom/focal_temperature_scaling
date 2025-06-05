@@ -6,16 +6,17 @@ import numpy as np
 from temperature_scaling import ModelWithTemperature
 from Metrics.metrics import AdaptiveECELoss
 from temperature_scaling import multi_focal_link
+from new_links import linear_invlink, multi_link
 
 link_dict = {
     'softmax': [1],
-    'focal': [0.25, 0.5, 0.75, 1, 2, 3, 5]#,
-    #'focal_linear': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100],
-    #'focal_exp_p': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100],
-    #'exp_1mp': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100],
-    #'one_minus_power': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100],
-    #'generalized_focal': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100],
-    #'log_power': [0.25, 0.5, 0.75, 1, 2, 3, 5, 100]
+    'focal': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7],
+    'focal_linear': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7],
+    'exp_p': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7],
+    'exp_1mp': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7],
+    'one_minus_power': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7],
+    'generalized_focal': [(b, g) for b in [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7] for g in [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7]],
+    'log_power': [0.25, 0.5, 0.75, 1, 1.5, 2, 3, 5, 7]
 }
 
 def multi_acc(y_pred, y_test):
@@ -52,7 +53,10 @@ def get_probs(logits, T=1, a=1, link='softmax'):
         probs = torch.nn.Softmax(dim=1)(logits / T)
     elif link == 'focal':
         probs = multi_focal_link(logits / T, a)
-    
+    elif link == 'generalized_focal':
+        probs = multi_link(logits / T, link, a[0], a[1])
+    else:
+        probs = multi_link(logits / T, link, a)
     return probs
 
 def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None):
@@ -79,28 +83,40 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
     for link_name in link_dict:
         gamma_dict[link_name] = {}
         for link_value in link_dict[link_name]:
-            gamma_dict[link_name][str(round(link_value, 2))] = {}
+            if isinstance(link_value, tuple):
+                # Round each element, then join with underscore
+                key = "_".join(str(round(v, 2)) for v in link_value)
+            else:
+                # Just round the float
+                key = str(round(link_value, 2))
+            gamma_dict[link_name][key] = {}
 
     for link_name in link_dict:
         for link_value in link_dict[link_name]:
 
+            if isinstance(link_value, tuple):
+                # Round each element, then join with underscore
+                key = "_".join(str(round(v, 2)) for v in link_value)
+            else:
+                # Just round the float
+                key = str(round(link_value, 2))
             scaled_model = ModelWithTemperature(net, a=link_value, link=link_name)
             scaled_model.set_temperature(val_logits, val_labels, cross_validate='ece', device=device)
             T_opt_ce = scaled_model.get_temperature(metric='ce')
             T_opt_ece = scaled_model.get_temperature(metric='ece')
             
-            gamma_dict[link_name][str(round(link_value, 2))]["CE"] = scaled_model.nll_vals
-            gamma_dict[link_name][str(round(link_value, 2))]["ECE"]  = scaled_model.ece_vals
+            gamma_dict[link_name][key]["CE"] = scaled_model.nll_vals
+            gamma_dict[link_name][key]["ECE"]  = scaled_model.ece_vals
 
             ### First uncalibrated
             val_pred = get_probs(val_logits, T=1, a=link_value, link=link_name)
-            evaluation_metrics['val']['uncalibrated'][link_name][str(round(link_value, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
+            evaluation_metrics['val']['uncalibrated'][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
             test_pred = get_probs(test_logits, T=1, a=link_value, link=link_name)
-            evaluation_metrics['test']['uncalibrated'][link_name][str(round(link_value, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
+            evaluation_metrics['test']['uncalibrated'][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
                 
             if train_labels is not None:
                 train_pred = get_probs(train_logits, T=1, a=link_value, link=link_name)
-                evaluation_metrics['train']['uncalibrated'][link_name][str(round(link_value, 2))] = evaluate(train_labels, train_pred, num_classes=num_classes)
+                evaluation_metrics['train']['uncalibrated'][link_name][key] = evaluate(train_labels, train_pred, num_classes=num_classes)
             
                 scaled_model.set_temperature(train_logits, train_labels, cross_validate='ece', device=device)
 
@@ -108,18 +124,18 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                     train_T_opt = scaled_model.get_temperature(metric=T_metric)
 
                     train_pred = get_probs(train_logits, T=train_T_opt, a=link_value, link=link_name)
-                    evaluation_metrics['train']['calibrated'][T_metric][link_name][str(round(link_value, 2))] = evaluate(train_labels, train_pred, num_classes=num_classes)
+                    evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = evaluate(train_labels, train_pred, num_classes=num_classes)
 
             for T_metric in ['ce', 'ece']:
                 T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
                 val_pred = get_probs(val_logits, T=T_opt, a=link_value, link=link_name)
-                evaluation_metrics['val']['calibrated'][T_metric][link_name][str(round(link_value, 2))] = evaluate(val_labels, val_pred, num_classes=num_classes)
+                evaluation_metrics['val']['calibrated'][T_metric][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
                 
                 test_pred = get_probs(test_logits, T=T_opt, a=link_value, link=link_name)
-                evaluation_metrics['test']['calibrated'][T_metric][link_name][str(round(link_value, 2))] = evaluate(test_labels, test_pred, num_classes=num_classes)
+                evaluation_metrics['test']['calibrated'][T_metric][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
             
             for T_metric in ['ce', 'ece']:
-                gamma_dict[link_name][str(round(link_value, 2))][" T_opt" + " " + T_metric] = T_opt_ce if T_metric == 'ce' else T_opt_ece
+                gamma_dict[link_name][key][" T_opt" + " " + T_metric] = T_opt_ce if T_metric == 'ce' else T_opt_ece
     
     evaluation_metrics['T_dict'] = gamma_dict
     return evaluation_metrics

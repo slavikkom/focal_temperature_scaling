@@ -26,9 +26,10 @@ from Net.wide_resnet import wide_resnet_cifar
 from Net.densenet import densenet121
 
 # Import loss functions
-from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive
-from Losses.loss import mmce, mmce_weighted
-from Losses.loss import brier_score
+#from Losses.loss import cross_entropy, focal_loss, focal_loss_adaptive
+#from Losses.loss import mmce, mmce_weighted
+#from Losses.loss import brier_score
+from Losses.loss import *
 
 # Import train and validation utilities
 from train_utils import train_single_epoch, test_single_epoch
@@ -66,7 +67,8 @@ def loss_function_save_name(loss_function,
                             gamma1=1.0,
                             gamma2=1.0,
                             gamma3=1.0,
-                            lamda=1.0):
+                            lamda=1.0,
+                            beta=1.0):
     res_dict = {
         'cross_entropy': 'cross_entropy',
         'focal_loss': 'focal_loss_gamma_' + str(gamma),
@@ -74,7 +76,15 @@ def loss_function_save_name(loss_function,
         'mmce': 'mmce_lamda_' + str(lamda),
         'mmce_weighted': 'mmce_weighted_lamda_' + str(lamda),
         'brier_score': 'brier_score',
-        'adafocal': 'adafocal'
+        'adafocal': 'adafocal',
+        # new losses
+        'linear':             'linear_beta_' + str(gamma),               # “β” is passed via --gamma 
+        'exp_p':              'exp_p_alpha_' + str(gamma),               # α via --gamma
+        'exp_1mp':            'exp_1mp_alpha_' + str(gamma),             # α via --gamma
+        'one_minus_power':    'one_minus_power_beta_' + str(gamma),      # β via --gamma
+        'generalized_focal':  'generalized_focal_beta_' + str(beta)    # β via --gamma2, γ via --gamma3
+                            + '_gamma_' + str(gamma),
+        'log_power':          'log_power_kappa_' + str(gamma),     
     }
     if (loss_function == 'focal_loss' and scheduled == True):
         res_str = 'focal_loss_scheduled_gamma_' + str(gamma1) + '_' + str(gamma2) + '_' + str(gamma3)
@@ -128,6 +138,8 @@ def parseArgs():
     parser.set_defaults(load=False)
     parser.add_argument("-b", type=int, default=train_batch_size,
                         dest="train_batch_size", help="Batch size")
+    parser.add_argument("--beta", type=float, default=1.0,
+        dest="beta", help="Generalized focal loss beta parameter")
     parser.add_argument("-tb", type=int, default=test_batch_size,
                         dest="test_batch_size", help="Test Batch size")
     parser.add_argument("-e", type=int, default=epoch, dest="epoch",
@@ -212,6 +224,8 @@ if __name__ == "__main__":
         args.train_batch_size = 16  # Small batch size
         args.test_batch_size = 16  # Small batch size
         # args.dataset_root = './data/smoke_test/'  # Use a small dataset
+
+    generalized_focal_beta = 1.0 if args.beta is None else args.beta
 
     cuda = False
     if (torch.cuda.is_available() and args.gpu):
@@ -325,7 +339,8 @@ if __name__ == "__main__":
                                         gamma=gamma,
                                         lamda=args.lamda,
                                         loss_mean=args.loss_mean,
-                                        scaler=scaler)
+                                        scaler=scaler,
+                                        beta=generalized_focal_beta)
         scheduler.step()
         val_loss = test_single_epoch(epoch,
                                      net,
@@ -333,7 +348,8 @@ if __name__ == "__main__":
                                      device,
                                      loss_function=args.loss_function,
                                      gamma=gamma,
-                                     lamda=args.lamda)
+                                     lamda=args.lamda,
+                                     beta=generalized_focal_beta)
         test_loss = test_single_epoch(epoch,
                                       net,
                                       test_loader,
@@ -341,7 +357,8 @@ if __name__ == "__main__":
                                       loss_function=args.loss_function,
                                       gamma=gamma,
                                       lamda=args.lamda,
-                                      use_amp=use_amp)
+                                      use_amp=use_amp,
+                                      beta=generalized_focal_beta)
         _, val_acc, _, _, _ = test_classification_net(net, val_loader, device, use_amp=use_amp)
 
         training_set_loss[epoch] = train_loss

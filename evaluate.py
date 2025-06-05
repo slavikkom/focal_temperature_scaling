@@ -204,7 +204,29 @@ if __name__ == "__main__":
         net.to(device)
     cudnn.benchmark = True
     net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
-    
+    """
+    from collections import OrderedDict
+
+    # 1) Instantiate your model (no DataParallel yet)
+    net = model(num_classes=num_classes, temp=1.0).to(device)
+
+    # 2) Wrap in DataParallel
+    if cuda:
+        net = torch.nn.DataParallel(net, device_ids=list(range(torch.cuda.device_count())))
+        cudnn.benchmark = True
+
+    # 3) Load the raw checkpoint (saved without “module.” prefixes)
+    raw_state = torch.load(args.save_loc + args.saved_model_name, map_location=device)
+
+    # 4) Prepend “module.” to each key so it matches the DataParallel model’s keys
+    new_state = OrderedDict()
+    for key, val in raw_state.items():
+        new_key = "module." + key
+        new_state[new_key] = val
+
+    # 5) Load into the DataParallel-wrapped model
+    net.load_state_dict(new_state)
+    """
     # nll_criterion = nn.CrossEntropyLoss().cuda()
     # ece_criterion = ECELoss().cuda()
     # adaece_criterion = AdaptiveECELoss().cuda()
