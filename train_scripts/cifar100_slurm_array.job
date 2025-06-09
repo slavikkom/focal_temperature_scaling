@@ -22,7 +22,7 @@ conda activate focal_scaling
 # python -c "import torch; print(torch.__version__)"
 
 
-SAVE_PATH="../MODEL_DIRECTORY/CIFAR100_FP32/"
+SAVE_PATH="../MODEL_DIRECTORY/CIFAR100/"
 SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
 AMP_ARG="--amp" # run with automatic mixed precision enabled or not. If not set it to empty string ""
 
