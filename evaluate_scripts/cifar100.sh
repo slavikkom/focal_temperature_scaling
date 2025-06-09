@@ -4,7 +4,7 @@
 USE_GPU=true
 SMOKE_TEST=true
 SAVE_PATH="../MODEL_DIRECTORY/CIFAR100/" # path used to save the models to use in order to lead them for evaluation
-SAVE_EVAL_PATH="./CIFAR100/" # path to save the evaluation results
+SAVE_EVAL_PATH="../RESULTS/CIFAR100/" # path to save the evaluation results
 MODEL_EPOCH=350 # to load the model trained for 350 epochs
 
 # Build flags
