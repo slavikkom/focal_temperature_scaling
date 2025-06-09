@@ -10,17 +10,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=6
 
-# Load models
-# module purge
-# module load python/3.9.12
-# module load cudnn/8.0.5.39-11.1
 conda init
 conda activate focal_scaling
-
-# Debug info
-# echo "Activated env: $(which python)"
-# python -c "import torch; print(torch.__version__)"
-
 
 SAVE_PATH="../MODEL_DIRECTORY/CIFAR100/"
 SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
