@@ -18,7 +18,7 @@ conda activate focal_scaling
 
 # Paths and settings
 SAVE_PATH="../MODEL_DIRECTORY/TINYIMAGENET/"
-SAVE_EVAL_PATH="./TINYIMAGENET_epoch100/"
+SAVE_EVAL_PATH="../RESULTS/TINYIMAGENET_epoch100/"
 MODEL_EPOCH=100
 SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
 GPU_FLAG="-g" # run on gpu or not. If not set it to empty string ""

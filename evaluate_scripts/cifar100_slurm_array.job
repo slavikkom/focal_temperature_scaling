@@ -18,7 +18,7 @@ conda activate focal_scaling
 
 # Paths and settings
 SAVE_PATH="../MODEL_DIRECTORY/CIFAR100/"
-SAVE_EVAL_PATH="./CIFAR100_epoch350/"
+SAVE_EVAL_PATH="../RESULTS/CIFAR100_epoch350/"
 MODEL_EPOCH=350
 SMOKE_ARG="--smoke-test" # to test that everything is running correctly. otherwise set it to empty string ""
 GPU_FLAG="-g" # run on gpu or not. If not set it to empty string ""
