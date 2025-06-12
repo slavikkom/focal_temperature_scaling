@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
+from new_losses import _safe_prob
+
 class FocalLoss(nn.Module):
     def __init__(self, gamma=0, size_average=False):
         super(FocalLoss, self).__init__()
@@ -25,7 +27,7 @@ class FocalLoss(nn.Module):
         logpt = F.log_softmax(input)
         logpt = logpt.gather(1,target)
         logpt = logpt.view(-1)
-        pt = logpt.exp()
+        pt = _safe_prob(logpt.exp())
 
         loss = -1 * (1-pt)**self.gamma * logpt
         if self.size_average: return loss.mean()
