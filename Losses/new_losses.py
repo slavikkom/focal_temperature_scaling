@@ -48,7 +48,7 @@ class LinearDecayLoss(nn.Module):
         pt = _safe_prob(logpt.exp())                           # [M]
 
         # g(pt) = 1 − β p_t
-        g = (1.0 - self.beta * pt).clamp(min=0.0)                      # [M]
+        g = (1.0 - self.beta * pt)#.clamp(min=0.0)                      # [M]
 
         # loss_i = g(pt) * (−log(pt)) = (1 − β pt) * (−logpt)
         loss = -g * logpt                             # [M]
