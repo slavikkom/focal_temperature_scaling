@@ -13,6 +13,8 @@ import random
 import json
 import sys
 import os
+import glob
+import re
 
 # Import dataloaders
 import Data.cifar10 as cifar10
@@ -208,13 +210,28 @@ def parseArgs():
                     help="Enable mixed precision training")
     parser.set_defaults(use_amp=False)
 
+    parser.add_argument("--seed", type=int, default=1,
+        dest="seed", help="random seed for reproducibility")
+
     return parser.parse_args()
 
 
+def set_seed(seed):
+    # os.environ['PYTHONHASHSEED'] = str(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        # torch.cuda.manual_seed_all(seed) # applicable to multi-GPU 
+
+    # For full reproducibility avoid using any non-deterministic algorithms
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
+
 if __name__ == "__main__":
 
-    torch.manual_seed(1)
     args = parseArgs()
+    set_seed(args.seed)
 
     if args.smoke_test:
         print("Running in smoke test mode...")
@@ -258,8 +275,39 @@ if __name__ == "__main__":
     start_epoch = 0
     num_epochs = args.epoch
     if args.load:
-        net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
+        # net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
+        # start_epoch = int(args.saved_model_name[args.saved_model_name.rfind('_')+1:args.saved_model_name.rfind('.model')])
+        # print("load model. start epoch: ", start_epoch)
+
+        # If saved_model_name is the default value, look for the latest saved model in the directory
+        if args.saved_model_name == "resnet50_cross_entropy_350.model":
+            # Define the pattern for the model name
+            model_loss_str = args.model_name + '_' + \
+                             loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda)
+            print("string to match: ", model_loss_str)
+            model_pattern = re.compile(rf"{model_loss_str}.*_(\d+)\.model$")
+            # Search for all model files in the save location
+            model_files = glob.glob(os.path.join(args.save_loc, "*.model"))
+            # Filter files that match the pattern
+            matching_files = [f for f in model_files if model_pattern.search(os.path.basename(f))]
+            print(matching_files) 
+            if matching_files:
+                # Extract the epoch number from each matching file and find the latest one
+                def extract_epoch(file_name):
+                    match = model_pattern.search(os.path.basename(file_name))
+                    return int(match.group(1)) if match else -1
+                
+                # Sort matching files by epoch number
+                matching_files.sort(key=extract_epoch, reverse=True)
+                args.saved_model_name = os.path.basename(matching_files[0])  # Use the latest model
+                print(f"Latest model found: {args.saved_model_name}")
+            else:
+                raise FileNotFoundError(f"No saved models matching the pattern found in {args.save_loc}.")
+    
+        # Load the model from the specified location
+        net.load_state_dict(torch.load(os.path.join(args.save_loc, args.saved_model_name)))
         start_epoch = int(args.saved_model_name[args.saved_model_name.rfind('_')+1:args.saved_model_name.rfind('.model')])
+        print(f"Resuming training from epoch {start_epoch}.")
 
     if args.optimiser == "sgd":
         opt_params = net.parameters()
@@ -300,7 +348,7 @@ if __name__ == "__main__":
         train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=args.train_batch_size,
             augment=args.data_aug,
-            random_seed=1,
+            random_seed=args.seed,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test,
         )
@@ -371,7 +419,7 @@ if __name__ == "__main__":
         if not os.path.exists(args.save_loc):
             os.makedirs(args.save_loc)
 
-        if val_acc > best_val_acc:
+        if val_acc > best_val_acc and epoch >= 150:  # Save only if validation accuracy improves and after 100 epochs
             best_val_acc = val_acc
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
