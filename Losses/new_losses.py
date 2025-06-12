@@ -2,6 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+_EPS = 1e-8
+
+def _safe_prob(pt: torch.Tensor) -> torch.Tensor:
+    """Clamp probabilities into (eps, 1−eps) to avoid log(0) and
+       fractional powers of negatives."""
+    return pt.clamp(min=_EPS, max=1.0 - _EPS) 
+
 # --------------------------------------------
 # 1. Linear‐decay loss g(p) = 1 − β p
 # --------------------------------------------
@@ -37,10 +45,10 @@ class LinearDecayLoss(nn.Module):
         # Gather log‐probability of the true class
         target = target.view(-1, 1)                  # [M, 1]
         logpt = logpt_all.gather(1, target).view(-1) # [M]
-        pt = logpt.exp()                             # [M]
+        pt = _safe_prob(logpt.exp())                           # [M]
 
         # g(pt) = 1 − β p_t
-        g = 1.0 - self.beta * pt                      # [M]
+        g = (1.0 - self.beta * pt).clamp(min=0.0)                      # [M]
 
         # loss_i = g(pt) * (−log(pt)) = (1 − β pt) * (−logpt)
         loss = -g * logpt                             # [M]
@@ -74,7 +82,7 @@ class ExpPLoss(nn.Module):
         logpt_all = F.log_softmax(input, dim=1)
         target = target.view(-1, 1)
         logpt = logpt_all.gather(1, target).view(-1)
-        pt = logpt.exp()
+        pt = _safe_prob(logpt.exp()) 
 
         # g(pt) = exp(−α pt)
         g = torch.exp(-self.alpha * pt)
@@ -110,7 +118,7 @@ class Exp1mpLoss(nn.Module):
         logpt_all = F.log_softmax(input, dim=1)
         target = target.view(-1, 1)
         logpt = logpt_all.gather(1, target).view(-1)
-        pt = logpt.exp()
+        pt = _safe_prob(logpt.exp())  
 
         # g(pt) = exp(−α (1 − pt))
         g = torch.exp(-self.alpha * (1.0 - pt))
@@ -146,10 +154,9 @@ class OneMinusPowerLoss(nn.Module):
         logpt_all = F.log_softmax(input, dim=1)
         target = target.view(-1, 1)
         logpt = logpt_all.gather(1, target).view(-1)
-        pt = logpt.exp()
-
-        # g(pt) = 1 − (pt)^β
-        g = 1.0 - pt.pow(self.beta)
+        pt = _safe_prob(logpt.exp())                               # --- STABILITY FIX ---
+        base = (1.0 - pt.pow(self.beta)).clamp(min=0.0)            # --- STABILITY FIX ---
+        g = base      
 
         loss = -g * logpt  # = (1 − pt^β)*(−logpt)
 
@@ -183,11 +190,10 @@ class GeneralizedFocalLoss(nn.Module):
         logpt_all = F.log_softmax(input, dim=1)
         target = target.view(-1, 1)
         logpt = logpt_all.gather(1, target).view(-1)
-        pt = logpt.exp()
 
-        # g(pt) = (1 − pt^β)^γ
-        g = (1.0 - pt.pow(self.beta)).pow(self.gamma)
-
+        pt = _safe_prob(logpt.exp())                               # --- STABILITY FIX ---
+        base = (1.0 - pt.pow(self.beta)).clamp(min=0.0)            # --- STABILITY FIX ---
+        g = base.pow(self.gamma)                                   # safe even for γ<1
         loss = -g * logpt
 
         if self.reduction == 'mean':
@@ -219,10 +225,8 @@ class LogPowerLoss(nn.Module):
         logpt_all = F.log_softmax(input, dim=1)
         target = target.view(-1, 1)
         logpt = logpt_all.gather(1, target).view(-1)
-        pt = logpt.exp()
-
-        # L = −log(pt); g(pt) = L^κ
-        L = -logpt
+        pt = _safe_prob(logpt.exp())                               # --- STABILITY FIX ---
+        L  = -torch.log(pt) 
         g = L.pow(self.kappa)
 
         # loss = g * L = (−log p)^(κ+1)
