@@ -10,3 +10,5 @@ evaluate_scripts/**/*.txt
 *.out
 
 RESULTS/
+
+train_scripts/*.txt 
