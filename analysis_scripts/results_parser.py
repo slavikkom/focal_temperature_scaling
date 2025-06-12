@@ -144,7 +144,13 @@ def evaluation_metrics_to_dataframe(evaluation_metrics):
         unc_dict = dataset_dict.get('uncalibrated', {})
         for link_name, values_dict in unc_dict.items():
             for link_value_str, metrics in values_dict.items():
-                link_value = float(link_value_str)
+                if link_name == 'generalized_focal':
+                    lv = [float(v) for v in link_value_str.split('_')]
+                    link_value = lv[0] 
+                    link_value2 = lv[1] 
+                else:
+                    link_value = float(link_value_str)
+                    link_value2 = None
                 CE = metrics.get('CE')
                 ECE_raw = metrics.get('ECE')
                 ECE = sum(ECE_raw['ece']) #if isinstance(ECE_raw, (list, tuple)) else ECE_raw
@@ -157,6 +163,7 @@ def evaluation_metrics_to_dataframe(evaluation_metrics):
                     'cal_criteria':  'None',
                     'link_name':     link_name,
                     'link_value':    link_value,
+                    'link_value2':    link_value2,
                     'CE':            CE,
                     'ECE':           ECE,
                     'Brier':         Brier,
@@ -168,7 +175,13 @@ def evaluation_metrics_to_dataframe(evaluation_metrics):
         for cal_criteria, links_dict in cal_block.items():   # cal_criteria is 'ce' or 'ece'
             for link_name, values_dict in links_dict.items():
                 for link_value_str, metrics in values_dict.items():
-                    link_value = float(link_value_str)
+                    if link_name == 'generalized_focal':
+                        lv = [float(v) for v in link_value_str.split('_')]
+                        link_value = lv[0] 
+                        link_value2 = lv[1] 
+                    else:
+                        link_value = float(link_value_str)
+                        link_value2 = None
                     CE = metrics.get('CE')
                     ECE_raw = metrics.get('ECE')
                     #print(ECE_raw['ece'])
@@ -182,6 +195,7 @@ def evaluation_metrics_to_dataframe(evaluation_metrics):
                         'cal_criteria':  cal_criteria,
                         'link_name':     link_name,
                         'link_value':    link_value,
+                        'link_value2':    link_value2,
                         'CE':            CE,
                         'ECE':           ECE,
                         'Brier':         Brier,
