@@ -158,7 +158,9 @@ class ModelWithTemperature(nn.Module):
         self.model.eval()
 
         nll_criterion = nn.NLLLoss().to(device)
-        ece_criterion = AdaptiveECELoss().to(device)
+        ece_criterion = AdaptiveECELoss(n_bins=25).to(device)
+
+        logits = (logits).clamp(-50., 50.)
 
         # Calculate NLL and ECE before temperature scaling
         print("Current parameter is ", self.a)
@@ -177,7 +179,7 @@ class ModelWithTemperature(nn.Module):
         
         T_opt_nll = 1.0
         T_opt_ece = 1.0
-        T = 0.05
+        T = 0.25
         
         for i in range(100):
             self.temperature = T
@@ -212,7 +214,7 @@ class ModelWithTemperature(nn.Module):
         self.to(device)
 
         # Calculate NLL and ECE after temperature scaling
-        probs = apply_link(logits, link=self.link, a=self.a)
+        probs = apply_link(logits / self.temperature, link=self.link, a=self.a)
 
         after_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
         after_temperature_ece = ece_criterion(probs, labels).item()
