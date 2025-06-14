@@ -282,6 +282,7 @@ if __name__ == "__main__":
         # If saved_model_name is the default value, look for the latest saved model in the directory
         if args.saved_model_name == "resnet50_cross_entropy_350.model":
             # Define the pattern for the model name
+            # TODO: NB! this model loading of the latest saved model found does not take care of the gamma schedule i.e. gamma_schedule=0
             model_loss_str = args.model_name + '_' + \
                              loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda)
             print("string to match: ", model_loss_str)
@@ -419,20 +420,20 @@ if __name__ == "__main__":
         if not os.path.exists(args.save_loc):
             os.makedirs(args.save_loc)
 
-        if val_acc > best_val_acc and epoch >= 150:  # Save only if validation accuracy improves and after 100 epochs
+        if val_acc > best_val_acc and epoch >= 250:  # Save only if validation accuracy improves and after 250 epochs
             best_val_acc = val_acc
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda) + \
+                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
                         '_best_' + \
                         str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
-        if (epoch + 1) % args.save_interval == 0:
+        if (((epoch + 1) % args.save_interval == 0) and (epoch > 100)) or args.smoke_test:
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda) + \
+                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
                         '_' + str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
