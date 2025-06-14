@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 
-from new_losses import _safe_prob
+from Losses.new_losses import _safe_prob
 
 class FocalLoss(nn.Module):
     def __init__(self, gamma=0, size_average=False):
