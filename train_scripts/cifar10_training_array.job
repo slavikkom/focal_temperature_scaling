@@ -1,16 +1,16 @@
 #!/bin/bash
 #SBATCH --job-name=cf10
-#SBATCH --output=slurm_logs_cifar10_2/job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar10/job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=05:00:00
+#SBATCH --time=06:00:00
 #SBATCH --mem=10G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 
 # Activate environment
-conda init
+source ~/.bashrc
 conda activate focal_scaling
 
 # Source config logic
@@ -41,35 +41,39 @@ SEED_IDX=$((SLURM_ARRAY_TASK_ID % NUM_SEEDS))
 
 ARGS=${CONFIGS[$CONFIG_ID]}
 SEED=${SEEDS[$SEED_IDX]}
-SAVE_PATH="../MODEL_DIRECTORY/CIFAR10/${SEED_IDX}/"
+SAVE_PATH="../MODEL_DIRECTORY/CIFAR10/${SEED}/"
 SMOKE_ARG=""  # Change to "--smoke-test" if needed
 AMP_ARG="--amp"
 
 echo "Running config: $ARGS"
 echo "Seed: $SEED"
+echo "Train mode: $TRAIN_MODE"
 
-# train from scratch
-python ../train.py \
-    --dataset cifar10 \
-    --model resnet50 \
-    $ARGS \
-    --decay 0.0005 \
-    -g $AMP_ARG \
-    --save-path $SAVE_PATH \
-    $SMOKE_ARG \
-    --seed $SEED \
-    --load \
-    --load-path $SAVE_PATH \
-
-# continue training
-# python ../train.py \
-#     --dataset cifar10 \
-#     --model resnet50 \
-#     $ARGS \
-#     --decay 0.0005 \
-#     -g $AMP_ARG \
-#     --save-path $SAVE_PATH \
-#     $SMOKE_ARG \
-#     --seed $SEED \
-#     --load \
-#     --load-path $SAVE_PATH 
+if [ "$TRAIN_MODE" == "scratch" ]; then
+    # Train from scratch
+    python ../train.py \
+        --dataset cifar10 \
+        --model resnet50 \
+        $ARGS \
+        --decay 0.0005 \
+        -g $AMP_ARG \
+        --save-path $SAVE_PATH \
+        $SMOKE_ARG \
+        --seed $SEED
+elif [ "$TRAIN_MODE" == "continue" ]; then
+    # Continue training
+    python ../train.py \
+        --dataset cifar10 \
+        --model resnet50 \
+        $ARGS \
+        --decay 0.0005 \
+        -g $AMP_ARG \
+        --save-path $SAVE_PATH \
+        $SMOKE_ARG \
+        --seed $SEED \
+        --load \
+        --load-path $SAVE_PATH
+else
+    echo "Invalid train mode: $TRAIN_MODE"
+    exit 1
+fi
