@@ -12,10 +12,12 @@ import torch.backends.cudnn as cudnn
 import Data.cifar10 as cifar10
 import Data.cifar100 as cifar100
 import Data.tiny_imagenet as tiny_imagenet
+import Data.pathmnist as pathmnist
+import medmnist
 
 # Import network architectures
 from Net.resnet_tiny_imagenet import resnet50 as resnet50_ti
-from Net.resnet import resnet50, resnet110
+from Net.resnet import resnet18, resnet50, resnet110
 from Net.wide_resnet import wide_resnet_cifar
 from Net.densenet import densenet121
 
@@ -32,17 +34,20 @@ from evaluate_focal_calibration import *
 dataset_num_classes = {
     'cifar10': 10,
     'cifar100': 100,
-    'tiny_imagenet': 200
+    'tiny_imagenet': 200,
+    'pathmnist': len(medmnist.INFO['pathmnist']['label']) # 9
 }
 
 dataset_loader = {
     'cifar10': cifar10,
     'cifar100': cifar100,
-    'tiny_imagenet': tiny_imagenet
+    'tiny_imagenet': tiny_imagenet,
+    'pathmnist': pathmnist
 }
 
 # Mapping model name to model function
 models = {
+    'resnet18': resnet18,
     'resnet50': resnet50,
     'resnet50_ti': resnet50_ti,
     'resnet110': resnet110,
@@ -157,7 +162,7 @@ if __name__ == "__main__":
 
     # Taking input for the dataset
     num_classes = dataset_num_classes[dataset]
-    if (args.dataset == 'tiny_imagenet'):
+    if ((args.dataset == 'tiny_imagenet') or (args.dataset == 'pathmnist')):
         train_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='train',
