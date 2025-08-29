@@ -3,7 +3,7 @@
 # Check if dataset argument is provided
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <dataset_name> [train_mode]"
-    echo "Valid dataset options: cifar10, cifar100, tinyimagenet"
+    echo "Valid dataset options: cifar10, cifar100, tinyimagenet, pathmnist"
     echo "Valid train_mode options: scratch (default), continue"
     exit 1
 fi
@@ -12,9 +12,9 @@ DATASET=$1
 TRAIN_MODE=${2:-scratch}  # Default to "scratch" if not provided
 
 # Validate dataset argument
-if [[ "$DATASET" != "cifar10" && "$DATASET" != "cifar100" && "$DATASET" != "tinyimagenet" ]]; then
+if [[ "$DATASET" != "cifar10" && "$DATASET" != "cifar100" && "$DATASET" != "tinyimagenet" && "$DATASET" != "pathmnist" ]]; then
     echo "Invalid dataset name: $DATASET"
-    echo "Valid options: cifar10, cifar100, tinyimagenet"
+    echo "Valid options: cifar10, cifar100, tinyimagenet, pathmnist"
     exit 1
 fi
 
@@ -80,4 +80,8 @@ sbatch --array=0-$((TOTAL_JOBS - 1)) --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_
 # sbatch --array=185,189,190,195 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
 
 # test rerun for timeoutted runs:
-# sbatch --array=20,264,265,266,267,268,275 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
+# cifar10 timeout
+# sbatch --array=0,1,2,23,91,92,93,94,95,110,179,180,182,257,258,259,262,317,318,319,320,381,382 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
+
+# cifar100 timeout
+# sbatch --array=27,28,29,128,129,130,256,257,346,360 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
