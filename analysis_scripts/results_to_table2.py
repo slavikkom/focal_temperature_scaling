@@ -140,31 +140,18 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     df = pd.concat([mean_df_full, std_selected], axis=1)
 
     # display(mean_df_full)
-    # assert False
 
-    # Filter the DataFrame based on the dataset and calibration criteria
-    # if uncalibrated_results: # for debugging purposes
-    #     cond_calib_ce = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None') 
-    #     cond_calib_ece = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')
-    # else:
-    cond_calib_ce = (df.calibration == 'calibrated') & (df.cal_criteria == 'ce') 
-    cond_calib_ece = (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')
-    cond_uncalib_ce = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None') 
-    cond_uncalib_ece = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')
+    # TODO: add an option to set the cal_criteria to CE or ECE
+    cond_calib = (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')
+    cond_uncalib = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')
     #
-    df_slice_tr_ce = df.loc[(df.dataset ==  'train') & cond_calib_ce]
-    df_slice_tr_ece = df.loc[(df.dataset == 'train') & cond_calib_ece]
-    df_slice_val_ce = df.loc[(df.dataset ==  'val') & cond_calib_ce]
-    df_slice_val_ece = df.loc[(df.dataset == 'val') & cond_calib_ece]
-    df_slice_te_ce = df.loc[(df.dataset == 'test') & cond_calib_ce]
-    df_slice_te_ece = df.loc[(df.dataset == 'test') & cond_calib_ece]
+    df_slice_tr = df.loc[(df.dataset ==  'train') & cond_calib]
+    df_slice_val = df.loc[(df.dataset ==  'val') & cond_calib]
+    df_slice_te = df.loc[(df.dataset == 'test') & cond_calib]
     # no tempereature scaling
-    df_slice_tr_ce_nots = df.loc[(df.dataset ==  'train') & cond_uncalib_ce]
-    df_slice_tr_ece_nots = df.loc[(df.dataset == 'train') & cond_uncalib_ece]
-    df_slice_val_ce_nots = df.loc[(df.dataset ==  'val') & cond_uncalib_ce]
-    df_slice_val_ece_nots = df.loc[(df.dataset == 'val') & cond_uncalib_ece]
-    df_slice_te_ce_nots = df.loc[(df.dataset == 'test') & cond_uncalib_ce]
-    df_slice_te_ece_nots = df.loc[(df.dataset == 'test') & cond_uncalib_ece]
+    df_slice_tr_nots = df.loc[(df.dataset ==  'train') & cond_uncalib]
+    df_slice_val_nots = df.loc[(df.dataset ==  'val') & cond_uncalib]
+    df_slice_te_nots = df.loc[(df.dataset == 'test') & cond_uncalib]
 
     def average_topt(data, link_name, param, criteria):
         """
@@ -184,45 +171,51 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
     # Base metrics: model calibrated via temperature scaling
     # accuracy
-    acc_b_tr = df_slice_tr_ce.ACC.iloc[0]
-    acc_b_val = df_slice_val_ce.ACC.iloc[0]
-    acc_b_te =  df_slice_te_ce.ACC.iloc[0]
-    acc_b_tr_std = df_slice_tr_ce.ACC_std.iloc[0]
-    acc_b_te_std =  df_slice_te_ce.ACC_std.iloc[0]
+    acc_b_tr = df_slice_tr.ACC.iloc[0]
+    acc_b_val = df_slice_val.ACC.iloc[0]
+    acc_b_te =  df_slice_te.ACC.iloc[0]
+    acc_b_tr_std = df_slice_tr.ACC_std.iloc[0]
+    acc_b_te_std =  df_slice_te.ACC_std.iloc[0]
     # Accuracy with no temperature scaling
-    acc_b_tr_nots = df_slice_tr_ce_nots.ACC.iloc[0]
-    acc_b_val_nots = df_slice_val_ce_nots.ACC.iloc[0]
-    acc_b_te_nots =  df_slice_te_ce_nots.ACC.iloc[0]
-    acc_b_tr_std_nots = df_slice_tr_ce_nots.ACC_std.iloc[0]
-    acc_b_te_std_nots =  df_slice_te_ce_nots.ACC_std.iloc[0]
+    acc_b_tr_nots = df_slice_tr_nots.ACC.iloc[0]
+    acc_b_val_nots = df_slice_val_nots.ACC.iloc[0]
+    acc_b_te_nots =  df_slice_te_nots.ACC.iloc[0]
+    acc_b_tr_std_nots = df_slice_tr_nots.ACC_std.iloc[0]
+    acc_b_te_std_nots =  df_slice_te_nots.ACC_std.iloc[0]
     # cross-entropy
     query_str = f"link_name == '{base_link_name}'"
-    ce_b_tr = df_slice_tr_ce.query(query_str).CE.values[0]
-    ce_b_val = df_slice_val_ce.query(query_str).CE.values[0]
-    ce_b_te = df_slice_te_ce.query(query_str).CE.values[0]
-    ce_b_tr_std = df_slice_tr_ce.query(query_str).CE_std.values[0]
-    ce_b_te_std = df_slice_te_ce.query(query_str).CE_std.values[0]
+    tr_b_best = df_slice_tr.query(query_str)
+    val_b_best = df_slice_val.query(query_str)
+    te_b_best = df_slice_te.query(query_str)
+    ce_b_tr = tr_b_best.CE.values[0]
+    ce_b_val = val_b_best.CE.values[0]
+    ce_b_te = te_b_best.CE.values[0]
+    ce_b_tr_std = tr_b_best.CE_std.values[0]
+    ce_b_te_std = te_b_best.CE_std.values[0]
     # CE with no temperature scaling
-    ce_b_tr_nots = df_slice_tr_ce_nots.query(query_str).CE.values[0]
-    ce_b_val_nots = df_slice_val_ce_nots.query(query_str).CE.values[0]
-    ce_b_te_nots = df_slice_te_ce_nots.query(query_str).CE.values[0]
-    ce_b_tr_std_nots = df_slice_tr_ce_nots.query(query_str).CE_std.values[0]
-    ce_b_te_std_nots = df_slice_te_ce_nots.query(query_str).CE_std.values[0]
+    tr_b_best_nots = df_slice_tr_nots.query(query_str)
+    val_b_best_nots = df_slice_val_nots.query(query_str)
+    te_b_best_nots = df_slice_te_nots.query(query_str)
+    ce_b_tr_nots = tr_b_best_nots.CE.values[0]
+    ce_b_val_nots = val_b_best_nots.CE.values[0]
+    ce_b_te_nots = te_b_best_nots.CE.values[0]
+    ce_b_tr_std_nots = tr_b_best_nots.CE_std.values[0]
+    ce_b_te_std_nots = te_b_best_nots.CE_std.values[0]
     # optimal temperature for CE based on validation set
     # ce_topt_b = data['T_dict']['softmax']['1'][' T_opt ce'] 
     ce_topt_b = average_topt(data_raws, base_link_name, 1, 'ce')[0]
     # expected calibration error (ECE)
-    ece_b_tr = df_slice_tr_ece.query(query_str).ECE.values[0]
-    ece_b_val = df_slice_val_ece.query(query_str).ECE.values[0]
-    ece_b_te = df_slice_te_ece.query(query_str).ECE.values[0]
-    ece_b_tr_std = df_slice_tr_ece.query(query_str).ECE_std.values[0]
-    ece_b_te_std = df_slice_te_ece.query(query_str).ECE_std.values[0]
+    ece_b_tr = tr_b_best.ECE.values[0]
+    ece_b_val = val_b_best.ECE.values[0]
+    ece_b_te = te_b_best.ECE.values[0]
+    ece_b_tr_std = tr_b_best.ECE_std.values[0]
+    ece_b_te_std = te_b_best.ECE_std.values[0]
     # ECE with no temperature scaling
-    ece_b_tr_nots = df_slice_tr_ece_nots.query(query_str).ECE.values[0]
-    ece_b_val_nots = df_slice_val_ece_nots.query(query_str).ECE.values[0]
-    ece_b_te_nots = df_slice_te_ece_nots.query(query_str).ECE.values[0]
-    ece_b_tr_std_nots = df_slice_tr_ece_nots.query(query_str).ECE_std.values[0]
-    ece_b_te_std_nots = df_slice_te_ece_nots.query(query_str).ECE_std.values[0]
+    ece_b_tr_nots = tr_b_best_nots.ECE.values[0]
+    ece_b_val_nots = val_b_best_nots.ECE.values[0]
+    ece_b_te_nots = te_b_best_nots.ECE.values[0]
+    ece_b_tr_std_nots = tr_b_best_nots.ECE_std.values[0]
+    ece_b_te_std_nots = te_b_best_nots.ECE_std.values[0]
     # optimal temperature for ECE based on validation set
     # ece_topt_b = data['T_dict'][base_link_name]['1'][' T_opt ece']
     ece_topt_b = average_topt(data_raws, base_link_name, 1, 'ece')[0]
@@ -271,6 +264,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'ECE_val': ece_b_val*100,
         'ECE': ece_b_te*100,
     }
+
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
     df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_b_tmp])], ignore_index=True) # to choose best performing
     multi_index.append((loss_type, param, 'N/A'))
@@ -283,55 +277,61 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
         query_str = f"link_name == '{link_name}'"
         # TODO: to have an option to select between CE/ECE to choose the best param
-        # lowest_ce_idx_val = df_slice_val_ce.query(query_str)['CE'].idxmin()
-        lowest_ece_idx_val = df_slice_val_ece.query(query_str)['ECE'].idxmin()
+        # lowest_idx_val = df_slice_val.query(query_str)['CE'].idxmin()
+        lowest_idx_val = df_slice_val.query(query_str)['ECE'].idxmin()
 
         # print(file_name)
         # print(link_name)
-        # display(df_slice_te_ece.query(f"link_name == '{link_name}'"))
+        # display(df_slice_te.query(f"link_name == '{link_name}'"))
 
         # 
-        best_param = df_slice_val_ece.loc[lowest_ece_idx_val].link_value # according to the ECE on val
+        best_param = df_slice_val.loc[lowest_idx_val].link_value # according to the ECE on val
         best_param = int(best_param) if best_param.is_integer() else best_param # convert to int if possible
         # accuracy
         best_param_query = query_str + f' & link_value == {best_param}'
-        acc_tr = df_slice_tr_ce.query(best_param_query).ACC.values[0]
-        acc_val = df_slice_val_ce.query(best_param_query).ACC.values[0]
-        acc_te = df_slice_te_ce.query(best_param_query).ACC.values[0]
-        acc_tr_std = df_slice_tr_ce.query(best_param_query).ACC_std.values[0]
-        acc_te_std = df_slice_te_ce.query(best_param_query).ACC_std.values[0]
+        tr_best = df_slice_tr.query(best_param_query)
+        val_best = df_slice_val.query(best_param_query)
+        te_best = df_slice_te.query(best_param_query)
+        acc_tr = tr_best.ACC.values[0]
+        acc_val = val_best.ACC.values[0]
+        acc_te = te_best.ACC.values[0]
+        acc_tr_std = tr_best.ACC_std.values[0]
+        acc_te_std = te_best.ACC_std.values[0]
         # no temperature scaling
-        acc_tr_nots = df_slice_tr_ce_nots.query(best_param_query).ACC.values[0]
-        acc_val_nots = df_slice_val_ce_nots.query(best_param_query).ACC.values[0]
-        acc_te_nots = df_slice_te_ce_nots.query(best_param_query).ACC.values[0]
-        acc_tr_std_nots = df_slice_tr_ce_nots.query(best_param_query).ACC_std.values[0]
-        acc_te_std_nots = df_slice_te_ce_nots.query(best_param_query).ACC_std.values[0]
+        tr_best_nots = df_slice_tr_nots.query(best_param_query)
+        val_best_nots = df_slice_val_nots.query(best_param_query)
+        te_best_nots = df_slice_te_nots.query(best_param_query)
+        acc_tr_nots = tr_best_nots.ACC.values[0]
+        acc_val_nots = val_best_nots.ACC.values[0]
+        acc_te_nots = te_best_nots.ACC.values[0]
+        acc_tr_std_nots = tr_best_nots.ACC_std.values[0]
+        acc_te_std_nots = te_best_nots.ACC_std.values[0]
         # ce
-        ce_tr = df_slice_tr_ce.query(best_param_query).CE.values[0]
-        ce_val = df_slice_val_ce.query(best_param_query).CE.values[0]
-        ce_te = df_slice_te_ce.query(best_param_query).CE.values[0]
-        ce_tr_std = df_slice_tr_ce.query(best_param_query).CE_std.values[0]
-        ce_te_std = df_slice_te_ce.query(best_param_query).CE_std.values[0]
+        ce_tr = tr_best.CE.values[0]
+        ce_val = val_best.CE.values[0]
+        ce_te = te_best.CE.values[0]
+        ce_tr_std = tr_best.CE_std.values[0]
+        ce_te_std = te_best.CE_std.values[0]
         # no temperature scaling
-        ce_tr_nots = df_slice_tr_ce_nots.query(best_param_query).CE.values[0]
-        ce_val_nots = df_slice_val_ce_nots.query(best_param_query).CE.values[0]
-        ce_te_nots = df_slice_te_ce_nots.query(best_param_query).CE.values[0]
-        ce_tr_std_nots = df_slice_tr_ce_nots.query(best_param_query).CE_std.values[0]
-        ce_te_std_nots = df_slice_te_ce_nots.query(best_param_query).CE_std.values[0]
+        ce_tr_nots = tr_best_nots.CE.values[0]
+        ce_val_nots = val_best_nots.CE.values[0]
+        ce_te_nots = te_best_nots.CE.values[0]
+        ce_tr_std_nots = tr_best_nots.CE_std.values[0]
+        ce_te_std_nots = te_best_nots.CE_std.values[0]
         # ce_topt = data['T_dict'][link_name][str(best_param)][' T_opt ce']
         ce_topt = average_topt(data_raws, link_name, best_param, 'ce')[0]
         # ece
-        ece_tr = df_slice_tr_ece.query(best_param_query).ECE.values[0]
-        ece_val = df_slice_val_ece.query(best_param_query).ECE.values[0]
-        ece_te = df_slice_te_ece.query(best_param_query).ECE.values[0]
-        ece_tr_std = df_slice_tr_ece.query(best_param_query).ECE_std.values[0]
-        ece_te_std = df_slice_te_ece.query(best_param_query).ECE_std.values[0]
+        ece_tr = tr_best.ECE.values[0]
+        ece_val = val_best.ECE.values[0]
+        ece_te = te_best.ECE.values[0]
+        ece_tr_std = tr_best.ECE_std.values[0]
+        ece_te_std = te_best.ECE_std.values[0]
         # no temperature scaling
-        ece_tr_nots = df_slice_tr_ece_nots.query(best_param_query).ECE.values[0]
-        ece_val_nots = df_slice_val_ece_nots.query(best_param_query).ECE.values[0]
-        ece_te_nots = df_slice_te_ece_nots.query(best_param_query).ECE.values[0]
-        ece_tr_std_nots = df_slice_tr_ece_nots.query(best_param_query).ECE_std.values[0]
-        ece_te_std_nots = df_slice_te_ece_nots.query(best_param_query).ECE_std.values[0]
+        ece_tr_nots = tr_best_nots.ECE.values[0]
+        ece_val_nots = val_best_nots.ECE.values[0]
+        ece_te_nots = te_best_nots.ECE.values[0]
+        ece_tr_std_nots = tr_best_nots.ECE_std.values[0]
+        ece_te_std_nots = te_best_nots.ECE_std.values[0]
         # ece_topt = data['T_dict'][link_name][str(best_param)][' T_opt ece']
         ece_topt = average_topt(data_raws, link_name, best_param, 'ece')[0]
 
@@ -428,7 +428,7 @@ min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 show_unsorted = True if N > 1 else False
 
 # best according to the validation metrics
-for metric in ['ECE_val', 'Log-Loss_val']:
+for metric in ['ECE_val', 'CE_val']:
     topN_idx = (
         df_paper_tmp[df_paper_tmp[metric] >= min_acceptable_ECE]
         .groupby(level='Loss')
