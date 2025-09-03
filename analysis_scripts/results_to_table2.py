@@ -29,18 +29,19 @@ else:
     raise ValueError(f"Unknown dataset name: {dataset_name}")
 
 loss_types = {
-    "cross_entropy":    {"prefix": f"{model_name}_cross_entropy", "params": [None], "method_name": "Cross-Entropy"},
-    "focal_loss":       {"prefix": "focal_loss_gamma",       "params": params, "method_name": "Focal  $\\gamma_{{tr}}={param}$"},
-    "linear_loss":      {"prefix": f"{model_name}_linear_beta",   "params": params, "method_name": "Linear $\\beta_{{tr}}={param}$"},
-    "exp_1mp_loss":     {"prefix": "exp_1mp_alpha",          "params": params, "method_name": "Exp1mp $\\alpha_{{tr}}={param}$"}, 
-    "exp_p_loss":       {"prefix": "exp_p_alpha",            "params": params, "method_name": "Exp    $\\alpha_{{tr}}={param}$"}, 
-    "log_power_loss":   {"prefix": "log_power_kappa",        "params": params, "method_name": "LogPow $\\kappa_{{tr}}={param}$"},
-    "minus_power_loss": {"prefix": "minus_power_beta",       "params": params, "method_name": "MinPow $\\beta_{{tr}}={param}$"},
+    "cross_entropy":    {"display_name": "CE",      "prefix": f"{model_name}_cross_entropy", "params": [None], "method_name": "Cross-Entropy",                   "link_name": "softmax"},
+    "focal_loss":       {"display_name": "Focal",   "prefix": "focal_loss_gamma",            "params": params, "method_name": "Focal  $\\gamma_{{tr}}={param}$", "link_name": "focal"},
+    "linear_loss":      {"display_name": "Linear",  "prefix": f"{model_name}_linear_beta",   "params": params, "method_name": "Linear $\\beta_{{tr}}={param}$",  "link_name": "focal_linear"},
+    "exp_p_loss":       {"display_name": "Expp",    "prefix": "exp_p_alpha",                 "params": params, "method_name": "Exp    $\\alpha_{{tr}}={param}$", "link_name": "exp_p"}, 
+    "exp_1mp_loss":     {"display_name": "Exp1mp",  "prefix": "exp_1mp_alpha",               "params": params, "method_name": "Exp1mp $\\alpha_{{tr}}={param}$", "link_name": "exp_1mp"}, 
+    "minus_power_loss": {"display_name": "MinusPow","prefix": "minus_power_beta",            "params": params, "method_name": "MinPow $\\beta_{{tr}}={param}$",  "link_name": "one_minus_power"},
+    "log_power_loss":   {"display_name": "LogPow",  "prefix": "log_power_kappa",             "params": params, "method_name": "LogPow $\\kappa_{{tr}}={param}$", "link_name": "log_power"},
 }
 
 base_link_name = 'softmax' # base link function name for the baseline (cross-entropy)
 include_train_performance = False # if True, include train performance in the table
 include_std = True # if True, include standard deviation in the table
+bestparam_based_on_ece = True # if True, use ECE, otherwise, use CE instead 
 # uncalibrated_results = False # if True, use uncalibrated results (for debugging purposes)
 
 # override include_std if only one random seed is used
@@ -49,14 +50,14 @@ if len(random_seeds) == 1:
 
 # Dictionary for mapping link function names
 link_functions = {
-    # 'softmax': '', # base link function 
-    'focal': 'focal',
-    'focal_linear': 'linear',
-    'exp_p': 'expp',
-    'exp_1mp': 'exp1mp',
-    'one_minus_power': '1mpower',
+    'softmax': '', # base link function 
+    'focal': 'Focal',
+    'focal_linear': 'Linear',
+    'exp_p': 'Expp',
+    'exp_1mp': 'Exp1mp',
+    'one_minus_power': 'MinusPow',
     # 'generalized_focal': 'gfocal',
-    'log_power': 'logp',
+    'log_power': 'LogPow',
 }
 
 # Generate file_names and method_names dynamically
@@ -70,7 +71,7 @@ for loss_type, details in loss_types.items():
     method_template = details.get("method_name")
 
     for param in params:
-        if param is None:
+        if loss_type == "cross_entropy":
             file_names.append(f"{prefix}_{epoch}.json")
             method_names.append("Cross-Entropy")
         else:
@@ -142,16 +143,22 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     # display(mean_df_full)
 
     # TODO: add an option to set the cal_criteria to CE or ECE
-    cond_calib = (df.calibration == 'calibrated') & (df.cal_criteria == 'ece')
+    cond_calib = (df.calibration == 'calibrated') & (df.cal_criteria == 'ece') 
     cond_uncalib = (df.calibration == 'uncalibrated') & (df.cal_criteria == 'None')
     #
     df_slice_tr = df.loc[(df.dataset ==  'train') & cond_calib]
     df_slice_val = df.loc[(df.dataset ==  'val') & cond_calib]
     df_slice_te = df.loc[(df.dataset == 'test') & cond_calib]
+    df_slice_tr.reset_index(drop=True, inplace=True)
+    df_slice_val.reset_index(drop=True, inplace=True)
+    df_slice_te.reset_index(drop=True, inplace=True)
     # no tempereature scaling
     df_slice_tr_nots = df.loc[(df.dataset ==  'train') & cond_uncalib]
     df_slice_val_nots = df.loc[(df.dataset ==  'val') & cond_uncalib]
     df_slice_te_nots = df.loc[(df.dataset == 'test') & cond_uncalib]
+    df_slice_tr_nots.reset_index(drop=True, inplace=True)
+    df_slice_val_nots.reset_index(drop=True, inplace=True)
+    df_slice_te_nots.reset_index(drop=True, inplace=True)
 
     def average_topt(data, link_name, param, criteria):
         """
@@ -184,38 +191,42 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     acc_b_te_std_nots =  df_slice_te_nots.ACC_std.iloc[0]
     # cross-entropy
     query_str = f"link_name == '{base_link_name}'"
-    tr_b_best = df_slice_tr.query(query_str)
     val_b_best = df_slice_val.query(query_str)
-    te_b_best = df_slice_te.query(query_str)
-    ce_b_tr = tr_b_best.CE.values[0]
+    tr_b_best = df_slice_tr.iloc[val_b_best.index[0]]
+    te_b_best = df_slice_te.iloc[val_b_best.index[0]]
+    # tr_b_best = df_slice_tr.query(query_str)
+    # te_b_best = df_slice_te.query(query_str)
+    ce_b_tr = tr_b_best.CE#.values[0]
     ce_b_val = val_b_best.CE.values[0]
-    ce_b_te = te_b_best.CE.values[0]
-    ce_b_tr_std = tr_b_best.CE_std.values[0]
-    ce_b_te_std = te_b_best.CE_std.values[0]
+    ce_b_te = te_b_best.CE#.values[0]
+    ce_b_tr_std = tr_b_best.CE_std#.values[0]
+    ce_b_te_std = te_b_best.CE_std#.values[0]
     # CE with no temperature scaling
-    tr_b_best_nots = df_slice_tr_nots.query(query_str)
     val_b_best_nots = df_slice_val_nots.query(query_str)
-    te_b_best_nots = df_slice_te_nots.query(query_str)
-    ce_b_tr_nots = tr_b_best_nots.CE.values[0]
+    # tr_b_best_nots = df_slice_tr_nots.query(query_str)
+    # te_b_best_nots = df_slice_te_nots.query(query_str)
+    tr_b_best_nots = df_slice_tr_nots.iloc[val_b_best_nots.index[0]]
+    te_b_best_nots = df_slice_te_nots.iloc[val_b_best_nots.index[0]]
+    ce_b_tr_nots = tr_b_best_nots.CE#.values[0]
     ce_b_val_nots = val_b_best_nots.CE.values[0]
-    ce_b_te_nots = te_b_best_nots.CE.values[0]
-    ce_b_tr_std_nots = tr_b_best_nots.CE_std.values[0]
-    ce_b_te_std_nots = te_b_best_nots.CE_std.values[0]
+    ce_b_te_nots = te_b_best_nots.CE#.values[0]
+    ce_b_tr_std_nots = tr_b_best_nots.CE_std#.values[0]
+    ce_b_te_std_nots = te_b_best_nots.CE_std#.values[0]
     # optimal temperature for CE based on validation set
     # ce_topt_b = data['T_dict']['softmax']['1'][' T_opt ce'] 
     ce_topt_b = average_topt(data_raws, base_link_name, 1, 'ce')[0]
     # expected calibration error (ECE)
-    ece_b_tr = tr_b_best.ECE.values[0]
+    ece_b_tr = tr_b_best.ECE#.values[0]
     ece_b_val = val_b_best.ECE.values[0]
-    ece_b_te = te_b_best.ECE.values[0]
-    ece_b_tr_std = tr_b_best.ECE_std.values[0]
-    ece_b_te_std = te_b_best.ECE_std.values[0]
+    ece_b_te = te_b_best.ECE#.values[0]
+    ece_b_tr_std = tr_b_best.ECE_std#.values[0]
+    ece_b_te_std = te_b_best.ECE_std#.values[0]
     # ECE with no temperature scaling
-    ece_b_tr_nots = tr_b_best_nots.ECE.values[0]
+    ece_b_tr_nots = tr_b_best_nots.ECE#.values[0]
     ece_b_val_nots = val_b_best_nots.ECE.values[0]
-    ece_b_te_nots = te_b_best_nots.ECE.values[0]
-    ece_b_tr_std_nots = tr_b_best_nots.ECE_std.values[0]
-    ece_b_te_std_nots = te_b_best_nots.ECE_std.values[0]
+    ece_b_te_nots = te_b_best_nots.ECE#.values[0]
+    ece_b_tr_std_nots = tr_b_best_nots.ECE_std#.values[0]
+    ece_b_te_std_nots = te_b_best_nots.ECE_std#.values[0]
     # optimal temperature for ECE based on validation set
     # ece_topt_b = data['T_dict'][base_link_name]['1'][' T_opt ece']
     ece_topt_b = average_topt(data_raws, base_link_name, 1, 'ece')[0]
@@ -267,7 +278,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
     df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_b_tmp])], ignore_index=True) # to choose best performing
-    multi_index.append((loss_type, param, 'N/A'))
+    multi_index.append((loss_types[loss_type]['display_name'], param, 'N/A'))
 
     # Metrics for each link function
     for link_name, latex_name in link_functions.items():
@@ -276,68 +287,79 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             continue  # Skip if the link function is not available
 
         query_str = f"link_name == '{link_name}'"
-        # TODO: to have an option to select between CE/ECE to choose the best param
-        # lowest_idx_val = df_slice_val.query(query_str)['CE'].idxmin()
-        lowest_idx_val = df_slice_val.query(query_str)['ECE'].idxmin()
+        # print(loss_types[loss_type]['link_name'])
+        # print(param)
+        # print("#")
 
+        # best param index is the one that has the lowest CE/CE
+        if bestparam_based_on_ece:
+            bestparam_idx_val = df_slice_val.query(query_str)['ECE'].idxmin()
+        else:
+            bestparam_idx_val = df_slice_val.query(query_str)['CE'].idxmin()
+
+        # print(bestparam_idx_val)
         # print(file_name)
         # print(link_name)
         # display(df_slice_te.query(f"link_name == '{link_name}'"))
 
         # 
-        best_param = df_slice_val.loc[lowest_idx_val].link_value # according to the ECE on val
-        best_param = int(best_param) if best_param.is_integer() else best_param # convert to int if possible
+        best_link_val = df_slice_val.loc[bestparam_idx_val].link_value # according to the ECE on val
+        best_link_val = int(best_link_val) if best_link_val.is_integer() else best_link_val # convert to int if possible
         # accuracy
-        best_param_query = query_str + f' & link_value == {best_param}'
-        tr_best = df_slice_tr.query(best_param_query)
-        val_best = df_slice_val.query(best_param_query)
-        te_best = df_slice_te.query(best_param_query)
-        acc_tr = tr_best.ACC.values[0]
+        best_link_val_query = query_str + f' & link_value == {best_link_val}'
+        # tr_best = df_slice_tr.query(best_param_query)
+        val_best = df_slice_val.query(best_link_val_query)
+        # te_best = df_slice_te.query(best_param_query)
+        tr_best = df_slice_tr.iloc[val_best.index[0]]
+        te_best = df_slice_te.iloc[val_best.index[0]]
+        acc_tr = tr_best.ACC#.values[0]
         acc_val = val_best.ACC.values[0]
-        acc_te = te_best.ACC.values[0]
-        acc_tr_std = tr_best.ACC_std.values[0]
-        acc_te_std = te_best.ACC_std.values[0]
+        acc_te = te_best.ACC#.values[0]
+        acc_tr_std = tr_best.ACC_std#.values[0]
+        acc_te_std = te_best.ACC_std#.values[0]
         # no temperature scaling
-        tr_best_nots = df_slice_tr_nots.query(best_param_query)
-        val_best_nots = df_slice_val_nots.query(best_param_query)
-        te_best_nots = df_slice_te_nots.query(best_param_query)
-        acc_tr_nots = tr_best_nots.ACC.values[0]
+        # tr_best_nots = df_slice_tr_nots.query(best_param_query)
+        val_best_nots = df_slice_val_nots.query(best_link_val_query)
+        # te_best_nots = df_slice_te_nots.query(best_param_query)
+        tr_best_nots = df_slice_tr_nots.iloc[val_best_nots.index[0]]
+        te_best_nots = df_slice_te_nots.iloc[val_best_nots.index[0]]
+        acc_tr_nots = tr_best_nots.ACC#.values[0]
         acc_val_nots = val_best_nots.ACC.values[0]
-        acc_te_nots = te_best_nots.ACC.values[0]
-        acc_tr_std_nots = tr_best_nots.ACC_std.values[0]
-        acc_te_std_nots = te_best_nots.ACC_std.values[0]
+        acc_te_nots = te_best_nots.ACC#.values[0]
+        acc_tr_std_nots = tr_best_nots.ACC_std#.values[0]
+        acc_te_std_nots = te_best_nots.ACC_std#.values[0]
         # ce
-        ce_tr = tr_best.CE.values[0]
+        ce_tr = tr_best.CE#.values[0]
         ce_val = val_best.CE.values[0]
-        ce_te = te_best.CE.values[0]
-        ce_tr_std = tr_best.CE_std.values[0]
-        ce_te_std = te_best.CE_std.values[0]
+        ce_te = te_best.CE#.values[0]
+        ce_tr_std = tr_best.CE_std#.values[0]
+        ce_te_std = te_best.CE_std#.values[0]
         # no temperature scaling
-        ce_tr_nots = tr_best_nots.CE.values[0]
+        ce_tr_nots = tr_best_nots.CE#.values[0]
         ce_val_nots = val_best_nots.CE.values[0]
-        ce_te_nots = te_best_nots.CE.values[0]
-        ce_tr_std_nots = tr_best_nots.CE_std.values[0]
-        ce_te_std_nots = te_best_nots.CE_std.values[0]
+        ce_te_nots = te_best_nots.CE#.values[0]
+        ce_tr_std_nots = tr_best_nots.CE_std#.values[0]
+        ce_te_std_nots = te_best_nots.CE_std#.values[0]
         # ce_topt = data['T_dict'][link_name][str(best_param)][' T_opt ce']
-        ce_topt = average_topt(data_raws, link_name, best_param, 'ce')[0]
+        ce_topt = average_topt(data_raws, link_name, best_link_val, 'ce')[0]
         # ece
-        ece_tr = tr_best.ECE.values[0]
+        ece_tr = tr_best.ECE#.values[0]
         ece_val = val_best.ECE.values[0]
-        ece_te = te_best.ECE.values[0]
-        ece_tr_std = tr_best.ECE_std.values[0]
-        ece_te_std = te_best.ECE_std.values[0]
+        ece_te = te_best.ECE#.values[0]
+        ece_tr_std = tr_best.ECE_std#.values[0]
+        ece_te_std = te_best.ECE_std#.values[0]
         # no temperature scaling
-        ece_tr_nots = tr_best_nots.ECE.values[0]
+        ece_tr_nots = tr_best_nots.ECE#.values[0]
         ece_val_nots = val_best_nots.ECE.values[0]
-        ece_te_nots = te_best_nots.ECE.values[0]
-        ece_tr_std_nots = tr_best_nots.ECE_std.values[0]
-        ece_te_std_nots = te_best_nots.ECE_std.values[0]
+        ece_te_nots = te_best_nots.ECE#.values[0]
+        ece_tr_std_nots = tr_best_nots.ECE_std#.values[0]
+        ece_te_std_nots = te_best_nots.ECE_std#.values[0]
         # ece_topt = data['T_dict'][link_name][str(best_param)][' T_opt ece']
-        ece_topt = average_topt(data_raws, link_name, best_param, 'ece')[0]
+        ece_topt = average_topt(data_raws, link_name, best_link_val, 'ece')[0]
 
         # Add the row for the best-performing parameter
         row = {
-            'Approach': f'$+{latex_name}_{{ev}}={best_param}$',
+            'Approach': f'$+{latex_name}_{{ev}}={best_link_val}$',
             'Accuracy': format_string(acc_tr, acc_tr_std, acc_te, acc_te_std, float_format='2.1f'),
             'CE': format_string(ce_tr, ce_tr_std, ce_te, ce_te_std, ce_topt),
             'CE*': format_string(ce_tr_nots, ce_tr_std_nots, ce_te_nots, ce_te_std_nots),
@@ -345,7 +367,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'ECE*': format_string(ece_tr_nots*100, ece_tr_std_nots*100, ece_te_nots*100, ece_te_std_nots*100),
         }
         row_tmp = {
-            'Approach': f'$+{latex_name}_{{ev}}={best_param}$',
+            'Approach': f'$+{latex_name}_{{ev}}={best_link_val}$',
             'Accuracy_tr': acc_tr,
             'Accuracy_val': acc_val,
             'Accuracy': acc_te,
@@ -358,7 +380,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
         df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
-        multi_index.append((loss_type, param, link_name))
+        multi_index.append((loss_types[loss_type]['display_name'], param, link_functions[link_name], best_link_val))
 
 # display(df_paper)
 
@@ -390,7 +412,7 @@ print(processed_latex_table)
 
 #%%
 
-multi_index = pd.MultiIndex.from_tuples(multi_index, names=['Loss', 'Param', 'Link'])
+multi_index = pd.MultiIndex.from_tuples(multi_index, names=['Loss', 'Param', 'Link', 'Value'])
 df_paper.index = multi_index
 df_paper_tmp.index = multi_index
 df_paper_tmp
@@ -402,27 +424,26 @@ def transfer_to_latex(df):
     latex_table = df.to_latex(index=True, float_format="%.2f", na_rep="N/A", escape=False)
     return latex_table
 
-# Trainability tables
-
-# choose the best performing method according to the test set and show the results on the test
-# trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Accuracy'].idxmax()].drop(columns=['Approach'])
-# print(transfer_to_latex(trainability_df))
-
-# trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Log-Loss'].idxmin()].drop(columns=['Approach'])
-# print(transfer_to_latex(trainability_df))
-
+# Trainability table
 # choose the best performing method according to the validation set but show the results on the test
-trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Accuracy_val'].idxmax()].drop(columns=['Approach'])
-print(transfer_to_latex(trainability_df))
-
-# trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Log-Loss_val'].idxmin()].drop(columns=['Approach'])
-# print(transfer_to_latex(trainability_df))
+# trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Accuracy_val'].idxmax()].drop(columns=['Approach'])
+# 1. only selected cases that the link is associated to the loss
+# 2. fine the best among those cases
+for criteria in ['Accuracy_val', 'CE_val', 'ECE_val']:
+    print(criteria)
+    same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
+    trainability_df = df_paper.loc[df_paper_tmp[same_link_as_loss].groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
+    trainability_df = trainability_df.reset_index(level=['Link', 'Value'], drop=True)
+    # trainability_df = trainability_df.sort_values("Accuracy", ascending=False)
+    trainability_df = trainability_df.reindex([loss_types[l]['display_name'] for l in loss_types.keys()], level='Loss')
+    # display(trainability_df)
+    print(transfer_to_latex(trainability_df))
 
 
 #%%
 
 # Calibration Tables 
-N=3
+N=1
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 # ece=0 can happen due to numerical instability of some of the loss functions.
 show_unsorted = True if N > 1 else False
