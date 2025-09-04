@@ -271,9 +271,11 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'CE_tr': ce_b_tr,
         'CE_val': ce_b_val,
         'CE': ce_b_te,
+        'CE*': ce_b_te_nots,
         'ECE_tr': ece_b_tr*100,
         'ECE_val': ece_b_val*100,
         'ECE': ece_b_te*100,
+        'ECE*': ece_b_te_nots*100,
     }
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
@@ -295,11 +297,51 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         # print(param)
         # print("#")
 
+        df_val_candidates = df_slice_val.query(query_str)
+        df_te_candidates = df_slice_val.query(query_str)
+
+        if bestparam_based_on_ece:
+            sorted_idx = df_val_candidates['ECE'].sort_values().index
+        else:
+            sorted_idx = df_val_candidates['CE'].sort_values().index
+
+
+        # find best link value given that it is not infinite or nan.
+        # bestparam_val_idx = None
+        # for idx in sorted_idx:
+        #     val_best = df_val_candidates.loc[[idx]]
+        #     te_best = df_te_candidates.loc[[idx]]
+
+        #     best_link_val = val_best.link_value.values[0]
+        #     best_link_val = int(best_link_val) if best_link_val.is_integer() else best_link_val
+
+        #     ce_te = te_best.CE.values[0]
+        #     ce_topt = average_topt(data_raws, link_name, best_link_val, 'ce')[0]
+
+        #     # if ((ce_topt <= 0.05) or (ce_topt >= 4.95)) and np.isinf(ce_te):
+        #     if np.isinf(ce_te) or np.isnan(ce_te):
+        #         print("isnan:", np.isnan(ce_te), "isinf: ", np.isinf(ce_te))
+        #         # print(f"skip {idx} - ce_topt {ce_topt:.2f} - ce_te {ce_te:.2f}")
+        #         continue
+        #     else:
+        #         bestparam_val_idx = idx
+        #         # print(f"chose {idx} - ce_topt {ce_topt:.2f} - ce_te {ce_te:.2f}")
+        #         # print(f"link val: {best_link_val}")
+        #         break
+
+        # if bestparam_val_idx is None:
+        #     # ce_topt = "N/A"
+        #     # print(f"No link value was found that had an optimal temperature that would result to a noninfinite CE for {link_name} in {file_name}.")
+        #     # print(idx)
+        #     bestparam_val_idx = sorted_idx[0]
+        #     print(f"No link value was found that had a noninfinite CE for loss {loss_type} {param} and link {link_name} in {file_name}.")
+        #     print(f"Decided to go with best link value {df_val_candidates.loc[[bestparam_val_idx]].link_value}.")
+
         # best param index is the one that has the lowest CE/CE
         if bestparam_based_on_ece:
-            bestparam_idx_val = df_slice_val.query(query_str)['ECE'].idxmin()
+            bestparam_val_idx = df_slice_val.query(query_str)['ECE'].idxmin()
         else:
-            bestparam_idx_val = df_slice_val.query(query_str)['CE'].idxmin()
+            bestparam_val_idx = df_slice_val.query(query_str)['CE'].idxmin()
 
         # print(bestparam_idx_val)
         # print(file_name)
@@ -307,7 +349,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         # display(df_slice_te.query(f"link_name == '{link_name}'"))
 
         # 
-        best_link_val = df_slice_val.loc[bestparam_idx_val].link_value # according to the ECE on val
+        best_link_val = df_slice_val.loc[bestparam_val_idx].link_value # according to the ECE on val
         best_link_val = int(best_link_val) if best_link_val.is_integer() else best_link_val # convert to int if possible
         # accuracy
         best_link_val_query = query_str + f' & link_value == {best_link_val}'
@@ -378,9 +420,11 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'CE_tr': ce_tr,
             'CE_val': ce_val,
             'CE': ce_te,
+            'CE*': ce_te_nots,
             'ECE_tr': ece_tr*100,
             'ECE_val': ece_val*100,
             'ECE': ece_te*100,
+            'ECE*': ece_te_nots,
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
         df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
@@ -443,6 +487,7 @@ for criteria in ['Accuracy_val', 'CE_val', 'ECE_val']:
     # display(trainability_df)
     print(transfer_to_latex(trainability_df))
 
+df_paper_tmp.round(3).to_excel(f"{dataset_name}_results.xlsx")
 
 #%%
 
@@ -453,9 +498,10 @@ min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 show_unsorted = True if N > 1 else False
 
 # best according to the validation metrics
-for metric in ['ECE_val', 'CE_val']:
+for metric in ['ECE_val']:#, 'CE_val']:
     topN_idx = (
-        df_paper_tmp[df_paper_tmp[metric] >= min_acceptable_ECE]
+        # ensure that the link value is finite in addition to looking at min_aceptable_ECE
+        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & np.isfinite(df_paper_tmp['CE'])]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
