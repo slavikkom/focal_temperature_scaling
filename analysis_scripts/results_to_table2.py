@@ -38,7 +38,6 @@ loss_types = {
     "log_power_loss":   {"display_name": "LogPow",  "prefix": "log_power_kappa",             "params": params, "method_name": "LogPow $\\kappa_{{tr}}={param}$", "link_name": "log_power"},
 }
 
-base_link_name = 'softmax' # base link function name for the baseline (cross-entropy)
 include_train_performance = False # if True, include train performance in the table
 include_std = True # if True, include standard deviation in the table
 bestparam_based_on_ece = True # if True, use ECE, otherwise, use CE instead 
@@ -50,7 +49,7 @@ if len(random_seeds) == 1:
 
 # Dictionary for mapping link function names
 link_functions = {
-    'softmax': '', # base link function 
+    'softmax': 'Softmax', # base link function 
     'focal': 'Focal',
     'focal_linear': 'Linear',
     'exp_p': 'Expp',
@@ -190,6 +189,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     acc_b_tr_std_nots = df_slice_tr_nots.ACC_std.iloc[0]
     acc_b_te_std_nots =  df_slice_te_nots.ACC_std.iloc[0]
     # cross-entropy
+    base_link_name = loss_types[loss_type]['link_name']
     query_str = f"link_name == '{base_link_name}'"
     val_b_best = df_slice_val.query(query_str)
     tr_b_best = df_slice_tr.iloc[val_b_best.index[0]]
@@ -283,8 +283,12 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     # Metrics for each link function
     for link_name, latex_name in link_functions.items():
         if link_name not in data_raws[0]['T_dict']:
+            print("yo"*100)
             # TODO: the check has to be over all of the list?
             continue  # Skip if the link function is not available
+
+        if link_name == base_link_name:
+            continue
 
         query_str = f"link_name == '{link_name}'"
         # print(loss_types[loss_type]['link_name'])
@@ -399,7 +403,7 @@ for i, line in enumerate(lines):
         
         # Check if the current line is not the last data row before \bottomrule
         # if not line.startswith("\\bottomrule") and row_count > 1 and (row_count - 1) % num_link_functions == 0 and i < len(lines) - 2:
-        if not line.startswith("\\bottomrule") and row_count > 0 and row_count % (num_link_functions+1) == 0:
+        if not line.startswith("\\bottomrule") and row_count > 0 and row_count % (num_link_functions) == 0:
             processed_lines.append("\\hline")
         row_count += 1
 
