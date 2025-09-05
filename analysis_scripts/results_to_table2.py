@@ -424,7 +424,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'ECE_tr': ece_tr*100,
             'ECE_val': ece_val*100,
             'ECE': ece_te*100,
-            'ECE*': ece_te_nots,
+            'ECE*': ece_te_nots*100,
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
         df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
@@ -498,7 +498,7 @@ min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 show_unsorted = True if N > 1 else False
 
 # best according to the validation metrics
-for metric in ['ECE_val']:#, 'CE_val']:
+for metric in ['ECE_val', 'CE_val']:
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
         df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & np.isfinite(df_paper_tmp['CE'])]
