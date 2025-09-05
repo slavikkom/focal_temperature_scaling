@@ -109,6 +109,9 @@ def parseArgs():
                     help="Run a lightweight smoke test")
     parser.set_defaults(smoke_test=False)
 
+    parser.add_argument("--seed", type=int, default=1,
+        dest="seed", help="random seed for reproducibility")
+
     return parser.parse_args()
 
 
@@ -129,6 +132,17 @@ def get_logits_labels(data_loader, net, device):
         labels = torch.cat(labels_list).to(device)
     return logits, labels
 
+def set_seed(seed):
+    # os.environ['PYTHONHASHSEED'] = str(seed)
+    random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        # torch.cuda.manual_seed_all(seed) # applicable to multi-GPU 
+
+    # For full reproducibility avoid using any non-deterministic algorithms
+    # torch.backends.cudnn.deterministic = True
+    # torch.backends.cudnn.benchmark = False
 
 if __name__ == "__main__":
 
@@ -137,11 +151,11 @@ if __name__ == "__main__":
     if (torch.cuda.is_available()):
         cuda = True
 
-    # Setting additional parameters
-    torch.manual_seed(1)
-    device = torch.device("cuda" if cuda else "cpu")
-
     args = parseArgs()
+
+    # Setting additional parameters
+    set_seed(args.seed)
+    device = torch.device("cuda" if cuda else "cpu")
 
     if args.smoke_test:
         print("Running in smoke test mode...")
@@ -187,7 +201,7 @@ if __name__ == "__main__":
         train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
             batch_size=args.train_batch_size,
             augment=args.data_aug,
-            random_seed=1,
+            random_seed=args.seed,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test
         )
