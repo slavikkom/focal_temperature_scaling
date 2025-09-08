@@ -7,13 +7,14 @@ import os
 from results_parser import evaluation_metrics_to_dataframe
 
 dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-# dataset_name = 'PATHMNIST'  
+dataset_name = 'DERMAMNIST'# 'PATHMNIST'  
 FP_str = "_FP32"
 FP_str = "" # FP16
 epoch = "350"
 random_seeds = [42, 123, 2023]
 # random_seeds = [42]
-RESULTS_DIR = f'../RESULTS/hpc_results_july/{dataset_name}_epoch{epoch}{FP_str}'
+# RESULTS_DIR = f'../RESULTS/hpc_results_july/{dataset_name}_epoch{epoch}{FP_str}'
+RESULTS_DIR = f'../RESULTS/hpc_results_august/{dataset_name}_epoch{epoch}{FP_str}'
 # RESULTS_DIR = f'../RESULTS/{dataset_name}_epoch{epoch}{FP_str}'
 params = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0]
 # params = [1.0]
@@ -21,7 +22,7 @@ params = [0.25, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0]
 # uncomment any combination of the rows to produce tables for that loss function
 if dataset_name == "CIFAR10" or dataset_name == "CIFAR100":
     model_name = "resnet50"
-elif dataset_name == "PATHMNIST":
+elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST":
     model_name = "resnet18"
 elif dataset_name == "TINYIMAGENET":
     model_name = "ti"
@@ -477,10 +478,17 @@ def transfer_to_latex(df):
 # trainability_df = df_paper.loc[df_paper_tmp.groupby(level=['Loss'])['Accuracy_val'].idxmax()].drop(columns=['Approach'])
 # 1. only selected cases that the link is associated to the loss
 # 2. fine the best among those cases
+min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 for criteria in ['Accuracy_val', 'CE_val', 'ECE_val']:
     print(criteria)
     same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
-    trainability_df = df_paper.loc[df_paper_tmp[same_link_as_loss].groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
+    filtered = df_paper_tmp[same_link_as_loss]
+    if criteria == 'Accuracy_val':
+        trainability_df = df_paper.loc[filtered.groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
+    elif criteria == 'ECE_val':
+        trainability_df = df_paper.loc[filtered[filtered['ECE_val'] >= min_acceptable_ECE].groupby(level=['Loss'])[criteria].idxmin()].drop(columns=['Approach'])
+    else:
+        trainability_df = df_paper.loc[df_paper_tmp[same_link_as_loss].groupby(level=['Loss'])[criteria].idxmin()].drop(columns=['Approach'])
     trainability_df = trainability_df.reset_index(level=['Link', 'Value'], drop=True)
     # trainability_df = trainability_df.sort_values("Accuracy", ascending=False)
     trainability_df = trainability_df.reindex([loss_types[l]['display_name'] for l in loss_types.keys()], level='Loss')
@@ -492,13 +500,15 @@ df_paper_tmp.round(3).to_excel(f"{dataset_name}_results.xlsx")
 #%%
 
 # Calibration Tables 
-N=1
+N=3
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 # ece=0 can happen due to numerical instability of some of the loss functions.
 show_unsorted = True if N > 1 else False
 
 # best according to the validation metrics
+print("Calibration Tables")
 for metric in ['ECE_val', 'CE_val']:
+    print("Best according to ", metric)
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
         df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & np.isfinite(df_paper_tmp['CE'])]
@@ -515,5 +525,5 @@ for metric in ['ECE_val', 'CE_val']:
 
     calibration_df = df_paper.loc[topN_idx_sorted].drop(columns=['Approach'])
     print(transfer_to_latex(calibration_df))
-    display(calibration_df)
+    # display(calibration_df)
 
