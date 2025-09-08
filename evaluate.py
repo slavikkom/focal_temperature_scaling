@@ -12,7 +12,7 @@ import torch.backends.cudnn as cudnn
 import Data.cifar10 as cifar10
 import Data.cifar100 as cifar100
 import Data.tiny_imagenet as tiny_imagenet
-import Data.pathmnist as pathmnist
+import Data.medmnist_loader as get_medmnist_data_loader
 import medmnist
 
 # Import network architectures
@@ -29,21 +29,38 @@ from Metrics.metrics import ECELoss, AdaptiveECELoss, ClasswiseECELoss
 from temperature_scaling import ModelWithTemperature
 from evaluate_focal_calibration import *
 
+medmnist_datasets = [
+    # TODO: curretn implmentation allows only for datasets with 3 channels. 
+    # Need to modify the e code to allow for 1 channel datasets as well.
+    'pathmnist', 
+    # 'chestmnist', 
+    'dermamnist', 
+    # 'octmnist', 
+    # 'pneumoniamnist', 
+    'retinamnist', 
+    # 'breastmnist', 
+    'bloodmnist'
+]
+
 
 # Dataset params
 dataset_num_classes = {
     'cifar10': 10,
     'cifar100': 100,
     'tiny_imagenet': 200,
-    'pathmnist': len(medmnist.INFO['pathmnist']['label']) # 9
 }
+
+for name in medmnist_datasets:
+    dataset_num_classes[name] = len(medmnist.INFO[name]['label'])
 
 dataset_loader = {
     'cifar10': cifar10,
     'cifar100': cifar100,
     'tiny_imagenet': tiny_imagenet,
-    'pathmnist': pathmnist
 }
+
+for name in medmnist_datasets:
+    dataset_loader[name] = get_medmnist_data_loader
 
 # Mapping model name to model function
 models = {
@@ -176,7 +193,7 @@ if __name__ == "__main__":
 
     # Taking input for the dataset
     num_classes = dataset_num_classes[dataset]
-    if ((args.dataset == 'tiny_imagenet') or (args.dataset == 'pathmnist')):
+    if (args.dataset == 'tiny_imagenet'):
         train_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
             split='train',
@@ -192,6 +209,30 @@ if __name__ == "__main__":
             smoke_test=args.smoke_test)
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
+            root=args.dataset_root,
+            split='val',
+            batch_size=args.test_batch_size,
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
+    elif args.dataset in medmnist_datasets:
+        train_loader = dataset_loader[args.dataset].get_medmnist_data_loader(
+            dataset_name=args.dataset,
+            root=args.dataset_root,
+            split='train',
+            batch_size=args.train_batch_size,
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
+
+        val_loader = dataset_loader[args.dataset].get_medmnist_data_loader(
+            dataset_name=args.dataset,
+            root=args.dataset_root,
+            split='val',
+            batch_size=args.test_batch_size,
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test)
+
+        test_loader = dataset_loader[args.dataset].get_medmnist_data_loader(
+            dataset_name=args.dataset,
             root=args.dataset_root,
             split='val',
             batch_size=args.test_batch_size,
