@@ -42,16 +42,17 @@ from train_utils import train_single_epoch, test_single_epoch
 from Metrics.metrics import test_classification_net
 
 medmnist_datasets = [
-    # TODO: curretn implmentation allows only for datasets with 3 channels. 
-    # Need to modify the e code to allow for 1 channel datasets as well.
     'pathmnist', 
-    # 'chestmnist', 
     'dermamnist', 
-    # 'octmnist', 
-    # 'pneumoniamnist', 
+    'octmnist', 
+    'pneumoniamnist', 
     'retinamnist', 
-    # 'breastmnist', 
-    'bloodmnist'
+    'breastmnist', 
+    'bloodmnist',
+    'tissuemnist',
+    'organamnist',
+    'organcmnist',
+    'organsmnist'
 ]
 
 dataset_num_classes = {
@@ -277,9 +278,12 @@ if __name__ == "__main__":
         use_amp = False
 
     num_classes = dataset_num_classes[args.dataset]
+    num_channels = 3
+    if args.dataset in medmnist_datasets:
+        num_channels = medmnist.INFO[args.dataset]['n_channels']
 
     # Choosing the model to train
-    net = models[args.model](num_classes=num_classes)
+    net = models[args.model](num_classes=num_classes, in_channels=num_channels)
 
     # Setting model name
     if args.model_name is None:

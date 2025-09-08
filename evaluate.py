@@ -30,16 +30,17 @@ from temperature_scaling import ModelWithTemperature
 from evaluate_focal_calibration import *
 
 medmnist_datasets = [
-    # TODO: curretn implmentation allows only for datasets with 3 channels. 
-    # Need to modify the e code to allow for 1 channel datasets as well.
     'pathmnist', 
-    # 'chestmnist', 
     'dermamnist', 
-    # 'octmnist', 
-    # 'pneumoniamnist', 
+    'octmnist', 
+    'pneumoniamnist', 
     'retinamnist', 
-    # 'breastmnist', 
-    'bloodmnist'
+    'breastmnist', 
+    'bloodmnist',
+    'tissuemnist',
+    'organamnist',
+    'organcmnist',
+    'organsmnist'
 ]
 
 
@@ -193,6 +194,10 @@ if __name__ == "__main__":
 
     # Taking input for the dataset
     num_classes = dataset_num_classes[dataset]
+    num_channels = 3
+    if args.dataset in medmnist_datasets:
+        num_channels = medmnist.INFO[args.dataset]['n_channels']
+
     if (args.dataset == 'tiny_imagenet'):
         train_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
@@ -255,7 +260,7 @@ if __name__ == "__main__":
 
     model = models[model_name]
 
-    net = model(num_classes=num_classes, temp=1.0)
+    net = model(num_classes=num_classes, in_channels=num_channels, temp=1.0)
     if cuda:
         net.cuda()
         # net.to(device)

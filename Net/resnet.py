@@ -63,11 +63,11 @@ class Bottleneck(nn.Module):
 
 
 class ResNet(nn.Module):
-    def __init__(self, block, num_blocks, num_classes=10, temp=1.0):
+    def __init__(self, block, num_blocks, num_classes=10, temp=1.0, in_channels=3):
         super(ResNet, self).__init__()
         self.in_planes = 64
 
-        self.conv1 = nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+        self.conv1 = nn.Conv2d(in_channels, 64, kernel_size=3, stride=1, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(64)
         self.layer1 = self._make_layer(block, 64, num_blocks[0], stride=1)
         self.layer2 = self._make_layer(block, 128, num_blocks[1], stride=2)
@@ -96,31 +96,26 @@ class ResNet(nn.Module):
         return out
 
 
-def resnet18(temp=1.0, **kwargs):
-    model = ResNet(BasicBlock, [2, 2, 2, 2], temp=temp, **kwargs)
+def resnet18(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(BasicBlock, [2, 2, 2, 2], temp=temp, in_channels=in_channels, **kwargs)
     return model
 
-
-def resnet34(temp=1.0, **kwargs):
-    model = ResNet(BasicBlock, [3, 4, 6, 3], temp=temp, **kwargs)
+def resnet34(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(BasicBlock, [3, 4, 6, 3], temp=temp, in_channels=in_channels, **kwargs)
     return model
 
-
-def resnet50(temp=1.0, **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 6, 3], temp=temp, **kwargs)
+def resnet50(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 6, 3], temp=temp, in_channels=in_channels, **kwargs)
     return model
 
-
-def resnet101(temp=1.0, **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 23, 3], temp=temp, **kwargs)
+def resnet101(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 23, 3], temp=temp, in_channels=in_channels, **kwargs)
     return model
 
-
-def resnet110(temp=1.0, **kwargs):
-    model = ResNet(Bottleneck, [3, 4, 26, 3], temp=temp, **kwargs)
+def resnet110(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(Bottleneck, [3, 4, 26, 3], temp=temp, in_channels=in_channels, **kwargs)
     return model
 
-
-def resnet152(temp=1.0, **kwargs):
-    model = ResNet(Bottleneck, [3, 8, 36, 3], temp=temp, **kwargs)
+def resnet152(temp=1.0, in_channels=3, **kwargs):
+    model = ResNet(Bottleneck, [3, 8, 36, 3], temp=temp, in_channels=in_channels, **kwargs)
     return model
