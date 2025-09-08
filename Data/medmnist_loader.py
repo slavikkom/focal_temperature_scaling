@@ -29,7 +29,7 @@ def get_medmnist_data_loader(dataset_name, root, batch_size, split='train', shuf
     base_dataset = medmnist_class(root=root, split=split, transform=transform, download=True, as_rgb=as_rgb)
     dataset = MedMNISTWrapper(base_dataset)
     if smoke_test:
-        indices = np.arange(100)
+        indices = np.arange(78) # 78 is the size of the smallest set in the medmnist datasets 
         dataset = torch.utils.data.Subset(dataset, indices)
     data_loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, pin_memory=pin_memory, shuffle=shuffle)
     return data_loader
