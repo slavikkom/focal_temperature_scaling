@@ -1,0 +1,79 @@
+#!/bin/bash
+#SBATCH --job-name=pm
+#SBATCH --output=slurm_logs_dermamnist/job_%A_%a.out
+#SBATCH --partition=gpu
+#SBATCH --nodes=1
+#SBATCH --gres=gpu:1
+#SBATCH --time=06:00:00
+#SBATCH --mem=10G
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+
+# Activate environment
+source ~/.bashrc
+conda activate focal_scaling
+
+# Source config logic
+source build_configs.sh
+
+# Seed list
+SEEDS=()
+define_seeds SEEDS
+
+# Loss configuration list
+CONFIGS=()
+build_configs CONFIGS
+
+# Compute indices
+NUM_SEEDS=${#SEEDS[@]}
+NUM_CONFIGS=${#CONFIGS[@]}
+TOTAL_JOBS=$((NUM_SEEDS * NUM_CONFIGS))
+
+# Safety check
+if [ "$SLURM_ARRAY_TASK_ID" -ge "$TOTAL_JOBS" ]; then
+    echo "Invalid task ID: $SLURM_ARRAY_TASK_ID"
+    exit 1
+fi
+
+# Select config and seed based on SLURM_ARRAY_TASK_ID
+CONFIG_ID=$((SLURM_ARRAY_TASK_ID / NUM_SEEDS))
+SEED_IDX=$((SLURM_ARRAY_TASK_ID % NUM_SEEDS))
+
+ARGS=${CONFIGS[$CONFIG_ID]}
+SEED=${SEEDS[$SEED_IDX]}
+SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST/${SEED}/"
+SMOKE_ARG=""  # Change to "--smoke-test" if needed
+AMP_ARG="--amp"
+
+echo "Running config: $ARGS"
+echo "Seed: $SEED"
+echo "Train mode: $TRAIN_MODE"
+
+if [ "$TRAIN_MODE" == "scratch" ]; then
+    # Train from scratch
+    python ../train.py \
+        --dataset dermamnist \
+        --model resnet18 \
+        $ARGS \
+        --decay 0.0005 \
+        -g $AMP_ARG \
+        --save-path $SAVE_PATH \
+        $SMOKE_ARG \
+        --seed $SEED
+elif [ "$TRAIN_MODE" == "continue" ]; then
+    # Continue training
+    python ../train.py \
+        --dataset dermamnist \
+        --model resnet18 \
+        $ARGS \
+        --decay 0.0005 \
+        -g $AMP_ARG \
+        --save-path $SAVE_PATH \
+        $SMOKE_ARG \
+        --seed $SEED \
+        --load \
+        --load-path $SAVE_PATH
+else
+    echo "Invalid train mode: $TRAIN_MODE"
+    exit 1
+fi

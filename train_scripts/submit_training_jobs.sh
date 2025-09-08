@@ -3,7 +3,7 @@
 # Check if dataset argument is provided
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <dataset_name> [train_mode]"
-    echo "Valid dataset options: cifar10, cifar100, tinyimagenet, pathmnist"
+    echo "Valid dataset options: cifar10, cifar100, tinyimagenet, pathmnist, dermamnist, retinamnist, bloodmnist"
     echo "Valid train_mode options: scratch (default), continue"
     exit 1
 fi
@@ -12,9 +12,9 @@ DATASET=$1
 TRAIN_MODE=${2:-scratch}  # Default to "scratch" if not provided
 
 # Validate dataset argument
-if [[ "$DATASET" != "cifar10" && "$DATASET" != "cifar100" && "$DATASET" != "tinyimagenet" && "$DATASET" != "pathmnist" ]]; then
+if [[ "$DATASET" != "cifar10" && "$DATASET" != "cifar100" && "$DATASET" != "tinyimagenet" && "$DATASET" != "pathmnist" && "$DATASET" != "dermamnist" && "$DATASET" != "retinamnist" && "$DATASET" != "bloodmnist" ]]; then
     echo "Invalid dataset name: $DATASET"
-    echo "Valid options: cifar10, cifar100, tinyimagenet, pathmnist"
+    echo "Valid options: cifar10, cifar100, tinyimagenet, pathmnist, dermamnist, retinamnist, bloodmnist"
     exit 1
 fi
 
