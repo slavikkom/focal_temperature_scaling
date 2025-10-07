@@ -4,7 +4,7 @@
 function define_seeds() {
     local -n seeds_ref=$1
     seeds_ref+=(42 123 2023) # 7 99)
-    # seeds_ref+=(1)
+    # seeds_ref+=(42)
 }
 
 function build_configs() {
@@ -30,9 +30,9 @@ function build_configs() {
     # configs_ref+=("--loss adafocal")
 
     # Generalized focal (grid over beta × gamma)
-    for b in "${betas[@]}"; do
-        for g in "${gammas[@]}"; do
-            configs_ref+=("--loss generalized_focal --beta $b --gamma $g")
-        done
-    done
+    # for b in "${betas[@]}"; do
+    #     for g in "${gammas[@]}"; do
+    #         configs_ref+=("--loss generalized_focal --beta $b --gamma $g")
+    #     done
+    # done
 }

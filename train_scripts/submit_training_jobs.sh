@@ -3,7 +3,7 @@
 # Check if dataset argument is provided
 if [ $# -lt 1 ]; then
     echo "Usage: $0 <dataset_name> [train_mode]"
-    echo "Valid dataset options: cifar10, cifar100, tinyimagenet, pathmnist, dermamnist, retinamnist, bloodmnist"
+    echo "Valid dataset options: cifar10, cifar100, tinyimagenet, pathmnist, dermamnist, octmnist, pneumoniamnist, retinamnist, breastmnist, bloodmnist, tissuemnist, organamnist, organcmnist, organsmnist"
     echo "Valid train_mode options: scratch (default), continue"
     exit 1
 fi
@@ -11,10 +11,10 @@ fi
 DATASET=$1
 TRAIN_MODE=${2:-scratch}  # Default to "scratch" if not provided
 
-# Validate dataset argument
-if [[ "$DATASET" != "cifar10" && "$DATASET" != "cifar100" && "$DATASET" != "tinyimagenet" && "$DATASET" != "pathmnist" && "$DATASET" != "dermamnist" && "$DATASET" != "retinamnist" && "$DATASET" != "bloodmnist" ]]; then
+VALID_DATASETS=(cifar10 cifar100 tinyimagenet pathmnist dermamnist octmnist pneumoniamnist retinamnist breastmnist bloodmnist tissuemnist organamnist organcmnist organsmnist)
+if [[ ! " ${VALID_DATASETS[@]} " =~ " ${DATASET} " ]]; then
     echo "Invalid dataset name: $DATASET"
-    echo "Valid options: cifar10, cifar100, tinyimagenet, pathmnist, dermamnist, retinamnist, bloodmnist"
+    echo "Valid options: ${VALID_DATASETS[*]}"
     exit 1
 fi
 
@@ -85,3 +85,6 @@ sbatch --array=0-$((TOTAL_JOBS - 1)) --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_
 
 # cifar100 timeout
 # sbatch --array=27,28,29,128,129,130,256,257,346,360 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
+
+# tissuemnist timeout
+# sbatch --array=4,11,49,60,88,90,140,141 --export=TRAIN_MODE="$TRAIN_MODE" "$SBATCH_FILE"
