@@ -2,10 +2,10 @@
 # Instruction how to use this script: first make any modifications to the 
 # parameters and models below and then run as a bash script to see the total number of jobs.
 # Once knew the total number of jobs, submit the job to slurm with the command: 
-# sbatch --array=0-<total_jobs> cifar10_slurm_array2.job
+# sbatch --array=0-<total_jobs> organsmnist_slurm_array.job
 
-#SBATCH --job-name=eval_derma
-#SBATCH --output=slurm_logs_dermamnist/eval_job_%A_%a.out
+#SBATCH --job-name=eval_organsmnist
+#SBATCH --output=slurm_logs_organsmnist/eval_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
@@ -26,14 +26,19 @@ ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+# SEED_DIRS=(42)
+# ALPHAS=(1.0) 
+# BETAS=(1.0)
+# GAMMAS=(1.0)
+# KAPPAS=(1.0)
 
 EPOCH=350
 SMOKE_ARG="" # --smoke-test for quick check or empty string for full run
 GPU_FLAG="-g"
 DEBUG=false # set to true for debugging which won't run the evaluation only to debug this script by printouts
 
-SAVE_BASE="../MODEL_DIRECTORY/DERMAMNIST"
-EVAL_BASE="../RESULTS/DERMAMNIST_epoch${EPOCH}"
+SAVE_BASE="../MODEL_DIRECTORY/ORGANSMNIST"
+EVAL_BASE="../RESULTS/ORGANSMNIST_epoch${EPOCH}"
 
 mkdir -p "$EVAL_BASE"
 
@@ -147,7 +152,7 @@ echo "Evaluating: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
 # Run evaluation
 if [ "$DEBUG" = false ]; then
   python ../evaluate.py \
-    --dataset dermamnist \
+    --dataset organsmnist \
     --model resnet18 \
     -log \
     $GPU_FLAG \
