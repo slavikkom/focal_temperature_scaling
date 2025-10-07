@@ -76,7 +76,7 @@ models = {
 
 def parseArgs():
     default_dataset = 'cifar10'
-    dataset_root = './'
+    dataset_root = './data'
     model = 'resnet50'
     save_loc = './'
     save_eval_loc = './'
