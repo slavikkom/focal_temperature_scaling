@@ -215,7 +215,7 @@ if __name__ == "__main__":
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
-            split='val',
+            split='test',
             batch_size=args.test_batch_size,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test)
@@ -239,7 +239,7 @@ if __name__ == "__main__":
         test_loader = dataset_loader[args.dataset].get_medmnist_data_loader(
             dataset_name=args.dataset,
             root=args.dataset_root,
-            split='val',
+            split='test',
             batch_size=args.test_batch_size,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test)
@@ -335,10 +335,22 @@ if __name__ == "__main__":
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
     
+
+    # def round_floats(obj, precision=6):
+    #     if isinstance(obj, float):
+    #         return round(obj, precision)
+    #     elif isinstance(obj, dict):
+    #         return {k: round_floats(v, precision) for k, v in obj.items()}
+    #     elif isinstance(obj, list):
+    #         return [round_floats(i, precision) for i in obj]
+    #     else:
+    #         return obj
+
     stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
                                           num_classes=num_classes, device=device,
                                           train_logits=train_logits,
                                           train_labels=train_labels)
+    # stats = round_floats(stats)
 
     # Ensure the save directory exists
     if not os.path.exists(args.save_eval_loc):

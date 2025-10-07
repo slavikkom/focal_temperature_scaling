@@ -365,7 +365,7 @@ if __name__ == "__main__":
 
         test_loader = dataset_loader[args.dataset].get_data_loader(
             root=args.dataset_root,
-            split='val',
+            split='test',
             batch_size=args.test_batch_size,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test)
@@ -389,7 +389,7 @@ if __name__ == "__main__":
         test_loader = dataset_loader[args.dataset].get_medmnist_data_loader(
             dataset_name=args.dataset,
             root=args.dataset_root,
-            split='val',
+            split='test',
             batch_size=args.test_batch_size,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test)
