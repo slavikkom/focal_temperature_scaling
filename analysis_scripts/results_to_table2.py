@@ -7,7 +7,7 @@ import os
 from results_parser import evaluation_metrics_to_dataframe
 
 dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-# dataset_name = 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST' # 'DERMAMNIST' # 'DERMAMNIST_B32' #'DERMAMNIST_LR05' # 'PATHMNIST'  
+dataset_name = 'OCTMNIST' # 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST_LR05' # 'DERMAMNIST' # 'DERMAMNIST_B32' # 'DERMAMNIST_LR05' # 'PATHMNIST'  
 FP_str = "_FP32"
 FP_str = "" # FP16
 epoch = "350"
@@ -29,7 +29,7 @@ params = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0]
 # uncomment any combination of the rows to produce tables for that loss function
 if dataset_name == "CIFAR10" or dataset_name == "CIFAR100":
     model_name = "resnet50"
-elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST" or dataset_name == "DERMAMNIST_B32" or dataset_name == "DERMAMNIST_LR05" or dataset_name == "OCTMNIST" or dataset_name == "ORGANSMNIST" or dataset_name == "TISSUEMNIST":
+elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST" or dataset_name == "DERMAMNIST_B32" or dataset_name == "DERMAMNIST_LR05" or dataset_name == "OCTMNIST" or dataset_name == "OCTMNIST_LR05" or dataset_name == "ORGANSMNIST" or dataset_name == "TISSUEMNIST":
     model_name = "resnet18"
 elif dataset_name == "TINYIMAGENET":
     model_name = "ti"
@@ -316,9 +316,15 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         if (link_name == base_link_name) and (link_name == 'softmax'):
             continue
 
-        if link_name == base_link_name: 
-            df_val_candidates = df_val_candidates.query(f"link_value != {param}")
-            df_te_candidates = df_te_candidates.query(f"link_value != {param}")
+        exclude_params = []
+        if link_name == 'focal_linear': # special case for linear link function
+            exclude_params = [5.0, 7.0]
+
+        if link_name == base_link_name:  # because the base link already included above
+            exclude_params += [param] if param not in exclude_params else []
+
+        df_val_candidates = df_val_candidates.query(f"link_value not in {exclude_params}")
+        df_te_candidates = df_te_candidates.query(f"link_value not in {exclude_params}")
 
         if bestparam_based_on_ece:
             sorted_idx = df_val_candidates['ECE'].sort_values().index
