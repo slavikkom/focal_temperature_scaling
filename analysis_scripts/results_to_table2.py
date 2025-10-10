@@ -213,6 +213,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ce_b_val = val_b_best.Logloss.values[0]
     ce_b_te = te_b_best.Logloss#.values[0]
     ce_b_tr_std = tr_b_best.Logloss_std#.values[0]
+    ce_b_val_std = val_b_best.Logloss_std.values[0]
     ce_b_te_std = te_b_best.Logloss_std#.values[0]
     # CE with no temperature scaling
     val_b_best_nots = df_slice_val_nots.query(query_str)
@@ -233,6 +234,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ece_b_val = val_b_best.ECE.values[0]
     ece_b_te = te_b_best.ECE#.values[0]
     ece_b_tr_std = tr_b_best.ECE_std#.values[0]
+    ece_b_val_std = val_b_best.ECE_std.values[0]
     ece_b_te_std = te_b_best.ECE_std#.values[0]
     # ECE with no temperature scaling
     ece_b_tr_nots = tr_b_best_nots.ECE#.values[0]
@@ -283,11 +285,14 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'Accuracy': acc_b_te, 
         'Logloss_tr': ce_b_tr,
         'Logloss_val': ce_b_val,
+        'Logloss_val_std': ce_b_val_std,
         'Logloss': ce_b_te,
         'Logloss*': ce_b_te_nots,
         'ECE_tr': ece_b_tr*100,
         'ECE_val': ece_b_val*100,
+        'ECE_val_std': ece_b_val_std*100,
         'ECE': ece_b_te*100,
+        'ECE_std': ece_b_te_std*100,
         'ECE*': ece_b_te_nots*100,
     }
 
@@ -405,6 +410,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         ce_val = val_best.Logloss.values[0]
         ce_te = te_best.Logloss#.values[0]
         ce_tr_std = tr_best.Logloss_std#.values[0]
+        ce_val_std = val_best.Logloss_std.values[0]
         ce_te_std = te_best.Logloss_std#.values[0]
         # no temperature scaling
         ce_tr_nots = tr_best_nots.Logloss#.values[0]
@@ -419,6 +425,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         ece_val = val_best.ECE.values[0]
         ece_te = te_best.ECE#.values[0]
         ece_tr_std = tr_best.ECE_std#.values[0]
+        ece_val_std = val_best.ECE_std.values[0]
         ece_te_std = te_best.ECE_std#.values[0]
         # no temperature scaling
         ece_tr_nots = tr_best_nots.ECE#.values[0]
@@ -445,11 +452,14 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'Accuracy': acc_te,
             'Logloss_tr': ce_tr,
             'Logloss_val': ce_val,
+            'Logloss_val_std': ce_val_std,
             'Logloss': ce_te,
             'Logloss*': ce_te_nots,
             'ECE_tr': ece_tr*100,
             'ECE_val': ece_val*100,
+            'ECE_val_std': ece_val_std*100,
             'ECE': ece_te*100,
+            'ECE_std': ece_te_std*100,
             'ECE*': ece_te_nots*100,
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
@@ -538,7 +548,9 @@ for metric in ['ECE_val', 'Logloss_val']:
     print("Best according to ", metric)
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
-        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & np.isfinite(df_paper_tmp['Logloss'])]
+        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & \
+                     (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
+                        np.isfinite(df_paper_tmp['Logloss'])]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
