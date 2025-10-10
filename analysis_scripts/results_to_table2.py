@@ -293,8 +293,8 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
     df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_b_tmp])], ignore_index=True) # to choose best performing
-    # multi_index.append((loss_types[loss_type]['display_name'], param, base_link_name, param))
-    multi_index.append((loss_types[loss_type]['display_name'], param, "N/A"))
+    multi_index.append((loss_types[loss_type]['display_name'], param, link_functions[base_link_name], param))
+    # multi_index.append((loss_types[loss_type]['display_name'], param, "N/A"))
     
     # Metrics for each link function
     for link_name, latex_name in link_functions.items():
@@ -506,7 +506,8 @@ def transfer_to_latex(df):
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 for criteria in ['Accuracy_val', 'Logloss_val', 'ECE_val']:
     print(criteria)
-    same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
+    # same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
+    same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'Softmax' 
     filtered = df_paper_tmp[same_link_as_loss]
     if criteria == 'Accuracy_val':
         trainability_df = df_paper.loc[filtered.groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
@@ -550,6 +551,11 @@ for metric in ['ECE_val', 'Logloss_val']:
         topN_idx_sorted = topN_idx
 
     calibration_df = df_paper.loc[topN_idx_sorted].drop(columns=['Approach'])
+
+    if N == 1: # preserve same order of losses as the trainability table
+        index_level0_trainability_df = df_paper_tmp.index.get_level_values('Loss').unique() 
+        calibration_df = calibration_df.loc[index_level0_trainability_df] 
+
     print(transfer_to_latex(calibration_df))
     # display(calibration_df)
 
