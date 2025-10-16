@@ -12,3 +12,4 @@ evaluate_scripts/**/*.txt
 RESULTS/
 
 train_scripts/*.txt 
+analysis_scripts/**/*.xlsx
