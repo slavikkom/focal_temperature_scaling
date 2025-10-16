@@ -7,7 +7,7 @@ import os
 from results_parser import evaluation_metrics_to_dataframe
 
 dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-# dataset_name = 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST' # 'DERMAMNIST' # 'DERMAMNIST_B32' #'DERMAMNIST_LR05' # 'PATHMNIST'  
+dataset_name = 'OCTMNIST' # 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST_LR05' # 'DERMAMNIST' # 'DERMAMNIST_B32' # 'DERMAMNIST_LR05' # 'PATHMNIST'  
 FP_str = "_FP32"
 FP_str = "" # FP16
 epoch = "350"
@@ -29,7 +29,7 @@ params = [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0, 7.0]
 # uncomment any combination of the rows to produce tables for that loss function
 if dataset_name == "CIFAR10" or dataset_name == "CIFAR100":
     model_name = "resnet50"
-elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST" or dataset_name == "DERMAMNIST_B32" or dataset_name == "DERMAMNIST_LR05" or dataset_name == "OCTMNIST" or dataset_name == "ORGANSMNIST" or dataset_name == "TISSUEMNIST":
+elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST" or dataset_name == "DERMAMNIST_B32" or dataset_name == "DERMAMNIST_LR05" or dataset_name == "OCTMNIST" or dataset_name == "OCTMNIST_LR05" or dataset_name == "ORGANSMNIST" or dataset_name == "TISSUEMNIST":
     model_name = "resnet18"
 elif dataset_name == "TINYIMAGENET":
     model_name = "ti"
@@ -213,6 +213,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ce_b_val = val_b_best.Logloss.values[0]
     ce_b_te = te_b_best.Logloss#.values[0]
     ce_b_tr_std = tr_b_best.Logloss_std#.values[0]
+    ce_b_val_std = val_b_best.Logloss_std.values[0]
     ce_b_te_std = te_b_best.Logloss_std#.values[0]
     # CE with no temperature scaling
     val_b_best_nots = df_slice_val_nots.query(query_str)
@@ -233,6 +234,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ece_b_val = val_b_best.ECE.values[0]
     ece_b_te = te_b_best.ECE#.values[0]
     ece_b_tr_std = tr_b_best.ECE_std#.values[0]
+    ece_b_val_std = val_b_best.ECE_std.values[0]
     ece_b_te_std = te_b_best.ECE_std#.values[0]
     # ECE with no temperature scaling
     ece_b_tr_nots = tr_b_best_nots.ECE#.values[0]
@@ -283,18 +285,21 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'Accuracy': acc_b_te, 
         'Logloss_tr': ce_b_tr,
         'Logloss_val': ce_b_val,
+        'Logloss_val_std': ce_b_val_std,
         'Logloss': ce_b_te,
         'Logloss*': ce_b_te_nots,
         'ECE_tr': ece_b_tr*100,
         'ECE_val': ece_b_val*100,
+        'ECE_val_std': ece_b_val_std*100,
         'ECE': ece_b_te*100,
+        'ECE_std': ece_b_te_std*100,
         'ECE*': ece_b_te_nots*100,
     }
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
     df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_b_tmp])], ignore_index=True) # to choose best performing
-    # multi_index.append((loss_types[loss_type]['display_name'], param, base_link_name, param))
-    multi_index.append((loss_types[loss_type]['display_name'], param, "N/A"))
+    multi_index.append((loss_types[loss_type]['display_name'], param, link_functions[base_link_name], param))
+    # multi_index.append((loss_types[loss_type]['display_name'], param, "N/A"))
     
     # Metrics for each link function
     for link_name, latex_name in link_functions.items():
@@ -316,9 +321,15 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         if (link_name == base_link_name) and (link_name == 'softmax'):
             continue
 
-        if link_name == base_link_name: 
-            df_val_candidates = df_val_candidates.query(f"link_value != {param}")
-            df_te_candidates = df_te_candidates.query(f"link_value != {param}")
+        exclude_params = []
+        if link_name == 'focal_linear': # special case for linear link function
+            exclude_params = [5.0, 7.0]
+
+        if link_name == base_link_name:  # because the base link already included above
+            exclude_params += [param] if param not in exclude_params else []
+
+        df_val_candidates = df_val_candidates.query(f"link_value not in {exclude_params}")
+        df_te_candidates = df_te_candidates.query(f"link_value not in {exclude_params}")
 
         if bestparam_based_on_ece:
             sorted_idx = df_val_candidates['ECE'].sort_values().index
@@ -399,6 +410,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         ce_val = val_best.Logloss.values[0]
         ce_te = te_best.Logloss#.values[0]
         ce_tr_std = tr_best.Logloss_std#.values[0]
+        ce_val_std = val_best.Logloss_std.values[0]
         ce_te_std = te_best.Logloss_std#.values[0]
         # no temperature scaling
         ce_tr_nots = tr_best_nots.Logloss#.values[0]
@@ -413,6 +425,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         ece_val = val_best.ECE.values[0]
         ece_te = te_best.ECE#.values[0]
         ece_tr_std = tr_best.ECE_std#.values[0]
+        ece_val_std = val_best.ECE_std.values[0]
         ece_te_std = te_best.ECE_std#.values[0]
         # no temperature scaling
         ece_tr_nots = tr_best_nots.ECE#.values[0]
@@ -439,11 +452,14 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'Accuracy': acc_te,
             'Logloss_tr': ce_tr,
             'Logloss_val': ce_val,
+            'Logloss_val_std': ce_val_std,
             'Logloss': ce_te,
             'Logloss*': ce_te_nots,
             'ECE_tr': ece_tr*100,
             'ECE_val': ece_val*100,
+            'ECE_val_std': ece_val_std*100,
             'ECE': ece_te*100,
+            'ECE_std': ece_te_std*100,
             'ECE*': ece_te_nots*100,
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
@@ -500,7 +516,8 @@ def transfer_to_latex(df):
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 for criteria in ['Accuracy_val', 'Logloss_val', 'ECE_val']:
     print(criteria)
-    same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
+    # same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
+    same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'Softmax' 
     filtered = df_paper_tmp[same_link_as_loss]
     if criteria == 'Accuracy_val':
         trainability_df = df_paper.loc[filtered.groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
@@ -531,7 +548,9 @@ for metric in ['ECE_val', 'Logloss_val']:
     print("Best according to ", metric)
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
-        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & np.isfinite(df_paper_tmp['Logloss'])]
+        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & \
+                     (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
+                        np.isfinite(df_paper_tmp['Logloss'])]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
@@ -544,6 +563,11 @@ for metric in ['ECE_val', 'Logloss_val']:
         topN_idx_sorted = topN_idx
 
     calibration_df = df_paper.loc[topN_idx_sorted].drop(columns=['Approach'])
+
+    if N == 1: # preserve same order of losses as the trainability table
+        index_level0_trainability_df = df_paper_tmp.index.get_level_values('Loss').unique() 
+        calibration_df = calibration_df.loc[index_level0_trainability_df] 
+
     print(transfer_to_latex(calibration_df))
     # display(calibration_df)
 

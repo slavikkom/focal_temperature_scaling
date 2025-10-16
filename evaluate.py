@@ -130,8 +130,14 @@ def parseArgs():
     parser.add_argument("--seed", type=int, default=1,
         dest="seed", help="random seed for reproducibility")
 
-    return parser.parse_args()
+    parser.add_argument("--save-train-logits", action="store_true", dest="save_train_logits",
+        help="Save train logits, labels, and indices to file.")
+    parser.add_argument("--save-val-logits", action="store_true", dest="save_val_logits",
+        help="Save validation logits, labels, and indices to file.")
+    parser.add_argument("--save-test-logits", action="store_true", dest="save_test_logits",
+        help="Save test logits, labels, and indices to file.")
 
+    return parser.parse_args()
 
 def get_logits_labels(data_loader, net, device):
     logits_list = []
@@ -352,6 +358,14 @@ if __name__ == "__main__":
                                           train_labels=train_labels)
     # stats = round_floats(stats)
 
+    def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
+        import numpy as np
+        logits = logits.cpu().numpy() if hasattr(logits, 'cpu') else logits
+        labels = labels.cpu().numpy() if hasattr(labels, 'cpu') else labels
+        if indices is None:
+            indices = np.arange(len(labels))
+        np.savez(filename, logits=logits, labels=labels, indices=indices)
+
     # Ensure the save directory exists
     if not os.path.exists(args.save_eval_loc):
         os.makedirs(args.save_eval_loc)
@@ -360,6 +374,13 @@ if __name__ == "__main__":
     save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
     with open(save_stats_path + ".json", 'w') as f:
         json.dump(stats, f)
+
+    if args.save_train_logits:
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels)
+    if args.save_val_logits:
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'val_logits_labels_indices.npz'), val_logits, val_labels)
+    if args.save_test_logits:
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'test_logits_labels_indices.npz'), test_logits, test_labels)
 
     res_str += '&{:.4f}({:.2f})&{:.4f}&{:.4f}&{:.4f}'.format(nll,  T_opt,  ece,  adaece, cece)
 
