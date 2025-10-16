@@ -6,9 +6,11 @@ TINY_IMAGENET_DIRECTORY/
 MODEL_DIRECTORY/
 evaluate_scripts/**/*.json
 evaluate_scripts/**/*.txt
+evaluate_scripts/*.npz
 *.zip
 *.out
 
 RESULTS/
 
 train_scripts/*.txt 
+train_scripts/*.npz
