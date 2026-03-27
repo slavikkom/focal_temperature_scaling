@@ -504,8 +504,14 @@ df_paper_tmp
 #%
 # df_paper_tmp.groupby(level=['Loss Function'])['Log-Loss'].idxmin()
 
-def transfer_to_latex(df):
-    latex_table = df.to_latex(index=True, float_format="%.2f", na_rep="N/A", escape=False)
+def transfer_to_latex(df, sparsify=True):
+    latex_table = df.to_latex(
+        index=True,
+        float_format="%.2f",
+        na_rep="N/A",
+        escape=False,
+        sparsify=sparsify,
+    )
     return latex_table
 
 # Trainability table
@@ -541,16 +547,47 @@ N=1
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 # ece=0 can happen due to numerical instability of some of the loss functions.
 show_unsorted = True if N > 1 else False
+with_calibration_baselines = True
+use_paired_loss_link = True # if True, match loss and calibration link; if False, use original behavior
+
+# Create a mapping from display_name to link_name for paired matching
+display_name_to_link = {
+    loss_types[loss_type]['display_name']: loss_types[loss_type]['link_name']
+    for loss_type in loss_types.keys()
+}
 
 # best according to the validation metrics
 print("Calibration Tables")
 for metric in ['ECE_val', 'Logloss_val']:
     print("Best according to ", metric)
+    
+    # Filter to paired loss-link if enabled
+    df_to_filter = df_paper_tmp.copy()
+    if use_paired_loss_link:
+        matching_indices = []
+        for loss_idx in df_paper_tmp.index:
+            loss_name = loss_idx[0]  # Get the Loss level value
+            link_name = loss_idx[2]  # Get the Link level value
+            
+            # Check if this loss and link correspond
+            expected_link = link_functions[display_name_to_link[loss_name]]
+            if link_name == expected_link:
+                matching_indices.append(loss_idx)
+        
+        df_to_filter = df_paper_tmp.loc[matching_indices]
+        # CE-Softmax is already included as a baseline, so exclude it from non-baseline rows.
+        df_to_filter = df_to_filter.loc[
+            ~(
+                (df_to_filter.index.get_level_values('Loss') == 'CE')
+                & (df_to_filter.index.get_level_values('Link') == 'Softmax')
+            )
+        ]
+    
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
-        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & \
-                     (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
-                        np.isfinite(df_paper_tmp['Logloss'])]
+        df_to_filter[(df_to_filter[metric] >= min_acceptable_ECE) & \
+                     (df_to_filter[metric] >= 1.2*df_to_filter[metric+'_std']) & \
+                        np.isfinite(df_to_filter['Logloss'])]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
@@ -568,6 +605,113 @@ for metric in ['ECE_val', 'Logloss_val']:
         index_level0_trainability_df = df_paper_tmp.index.get_level_values('Loss').unique() 
         calibration_df = calibration_df.loc[index_level0_trainability_df] 
 
-    print(transfer_to_latex(calibration_df))
+    # Baselines: CE with softmax link as baseline 1
+    baseline1_idx = \
+        df_paper_tmp.loc[
+                    (df_paper_tmp.index.get_level_values('Loss') == 'CE') &
+                    (df_paper_tmp.index.get_level_values('Link') == 'Softmax')
+        ].index
+    
+    # Focal with softmax link as baseline 2
+    top1_baseline2_idx = (
+        df_paper_tmp[
+                        (df_paper_tmp.index.get_level_values('Loss') == 'Focal') & \
+                        (df_paper_tmp.index.get_level_values('Link') == 'Softmax') & \
+                        (df_paper_tmp[metric] >= min_acceptable_ECE) & \
+                        (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
+                        np.isfinite(df_paper_tmp['Logloss'])]
+        .groupby(level='Loss')
+        .apply(lambda x: x[metric].nsmallest(N).index)
+        .explode()
+    )
+    
+    baseline1 = df_paper.loc[baseline1_idx].drop(columns=['Approach'])
+    baseline2 = df_paper.loc[top1_baseline2_idx].drop(columns=['Approach'])
+
+    calibration_df_withbaselines = pd.concat([baseline1, baseline2, calibration_df], axis=0)
+
+    if with_calibration_baselines:
+        print(
+            calibration_df_withbaselines.to_latex(
+                index=True,
+                float_format="%.2f",
+                na_rep="N/A",
+                escape=False,
+                sparsify=False,
+            )
+        )
+    else:
+        print(
+            calibration_df.to_latex(
+                index=True,
+                float_format="%.2f",
+                na_rep="N/A",
+                escape=False,
+                sparsify=False,
+            )
+        )
     # display(calibration_df)
 
+
+#%%
+
+# df_paper_tmp[df_paper_tmp.index.get_level_values('Link') == 'Focal']
+linkvalue_df = df_paper_tmp.groupby(level=['Link', 'Value'])
+# linkvalue_df['ECE'] < linkvalue_df['ECE*']
+# linkvalue_df.count()
+
+#%%
+
+# Extract ECE values from the baselines
+ece_baseline1 = df_paper_tmp.loc[baseline1_idx]['ECE'].values
+ece_baseline2 = df_paper_tmp.loc[baseline2.index]['ECE'].values
+
+# Initialize a dictionary to hold counts
+link_comparison = {}
+
+
+# for (link, value), group in df_paper_tmp.groupby(level=['Link', 'Value']):
+#     print(f"Link: {link}, Value: {value}")
+#     print(group[['ECE']])
+#     print("#")
+# Iterate through the DataFrame to calculate fractions
+for (link, value), group in df_paper_tmp.groupby(level=['Link', 'Value']):
+    # Count how many times ECE is lower than baseline1
+    count_lower_baseline1 = (group['ECE'].values < ece_baseline1).sum()
+    total_count_baseline1 = len(group)
+    relative_to_baseline1 = (group['ECE'].values - ece_baseline1).mean() / ece_baseline1
+    
+    # Count how many times ECE is lower than baseline2
+    count_lower_baseline2 = (group['ECE'].values < ece_baseline2).sum()
+    total_count_baseline2 = len(group)
+    relative_to_baseline2 = (group['ECE'].values - ece_baseline2).mean() / ece_baseline2
+    
+    # Calculate the fractions
+    fraction_baseline1 = count_lower_baseline1 / total_count_baseline1 if total_count_baseline1 > 0 else 0
+    fraction_baseline2 = count_lower_baseline2 / total_count_baseline2 if total_count_baseline2 > 0 else 0
+    
+    # Calculate relative change only for cases that improve ECE
+    improved_ece = group['ECE'].values < ece_baseline1
+    relative_change_improved_baseline1 = (group['ECE'][improved_ece].mean() - ece_baseline1) / ece_baseline1 if improved_ece.any() else 0.0
+    
+    improved_ece = group['ECE'].values < ece_baseline2
+    relative_change_improved_baseline2 = (group['ECE'][improved_ece].mean() - ece_baseline2) / ece_baseline2 if improved_ece.any() else 0.0
+    
+    # Store the results
+    link_comparison[(link, value)] = {
+        'Fraction_Baseline1': fraction_baseline1.round(2),
+        'Fraction_Baseline2': fraction_baseline2.round(2),
+        'Relative_to_Baseline1': relative_to_baseline1[0].round(2),
+        'Relative_to_Baseline2': relative_to_baseline2[0].round(2),
+        'Relative_Change_Improved_Baseline1': round(float(relative_change_improved_baseline1), 2),
+        'Relative_Change_Improved_Baseline2': round(float(relative_change_improved_baseline2), 2)
+    }
+
+# Create a summary DataFrame
+summary_df = pd.DataFrame.from_dict(link_comparison, orient='index')
+summary_df.index = pd.MultiIndex.from_tuples(summary_df.index, names=['Link', 'Value'])
+
+# Print the summary table
+print(summary_df.to_excel(f'{dataset_name}_link_improvement_summary.xlsx'))
+
+#%%
