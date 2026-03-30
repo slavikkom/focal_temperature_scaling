@@ -289,6 +289,9 @@ if __name__ == "__main__":
     if args.model_name is None:
         args.model_name = args.model
 
+    # Ensure the save directory exists upfront for checkpoints and logs.
+    os.makedirs(args.save_loc, exist_ok=True)
+
     if args.gpu is True:
         net.cuda()
         net = torch.nn.DataParallel(
@@ -297,6 +300,23 @@ if __name__ == "__main__":
 
     start_epoch = 0
     num_epochs = args.epoch
+    best_save_after_epoch = max(1, min(50 if args.dataset == "tiny_imagenet" else 250, num_epochs))
+    periodic_save_after_epoch = max(1, min(50 if args.dataset == "tiny_imagenet" else 100, num_epochs))
+
+    run_prefix = os.path.join(
+        args.save_loc,
+        args.model_name + '_' +
+        loss_function_save_name(
+            args.loss_function,
+            args.gamma_schedule,
+            args.gamma,
+            args.gamma,
+            args.gamma2,
+            args.gamma3,
+            args.lamda,
+            args.beta
+        )
+    )
     if args.load:
         # net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
         # start_epoch = int(args.saved_model_name[args.saved_model_name.rfind('_')+1:args.saved_model_name.rfind('.model')])
@@ -464,11 +484,7 @@ if __name__ == "__main__":
         val_set_err[epoch] = 1 - val_acc
 
 
-        # Ensure the save directory exists
-        if not os.path.exists(args.save_loc):
-            os.makedirs(args.save_loc)
-
-        if val_acc > best_val_acc and epoch >= 250:  # Save only if validation accuracy improves and after 250 epochs
+        if val_acc > best_val_acc and (epoch + 1) >= best_save_after_epoch:
             best_val_acc = val_acc
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
@@ -478,7 +494,9 @@ if __name__ == "__main__":
                         str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
-        if (((epoch + 1) % args.save_interval == 0) and (epoch > 100)) or args.smoke_test:
+        if ((((epoch + 1) % args.save_interval == 0) and ((epoch + 1) >= periodic_save_after_epoch))
+                or args.smoke_test
+                or ((epoch + 1) == num_epochs)):
             save_name = args.save_loc + \
                         args.model_name + '_' + \
                         loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
@@ -486,14 +504,14 @@ if __name__ == "__main__":
             torch.save(net.state_dict(), save_name)
 
 
-    with open(save_name[:save_name.rfind('_')] + '_train_loss.json', 'a') as f:
+    with open(run_prefix + '_train_loss.json', 'w') as f:
         json.dump(training_set_loss, f)
 
-    with open(save_name[:save_name.rfind('_')] + '_val_loss.json', 'a') as fv:
+    with open(run_prefix + '_val_loss.json', 'w') as fv:
         json.dump(val_set_loss, fv)
 
-    with open(save_name[:save_name.rfind('_')] + '_test_loss.json', 'a') as ft:
+    with open(run_prefix + '_test_loss.json', 'w') as ft:
         json.dump(test_set_loss, ft)
 
-    with open(save_name[:save_name.rfind('_')] + '_val_error.json', 'a') as ft:
+    with open(run_prefix + '_val_error.json', 'w') as ft:
         json.dump(val_set_err, ft)
