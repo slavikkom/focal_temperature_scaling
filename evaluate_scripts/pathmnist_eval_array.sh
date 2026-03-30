@@ -5,7 +5,7 @@
 # sbatch --array=0-<total_jobs> cifar10_slurm_array2.job
 
 #SBATCH --job-name=eval_cf10
-#SBATCH --output=slurm_logs_cifar10/eval_job_%A_%a.out
+#SBATCH --output=slurm_logs_pathmnist/eval_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
@@ -28,7 +28,7 @@ SEED_DIRS=(42) # 123 2023) # TODO: it might be better to use the actual seed val
 # KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 
 ALPHAS=(1.0)
-BETAS= (1.0)
+BETAS=(1.0)
 GAMMAS=(1.0)
 KAPPAS=(1.0)
 
@@ -60,23 +60,23 @@ COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
   for model in "${MODELS[@]}"; do
     case $model in
-      "resnet50_cross_entropy")
+      "resnet18_cross_entropy")
         # No parameters required
         COMBINATIONS+=("$seed_idx|$model|none|none")
         ;;
-      "resnet50_exp_1mp"|"resnet50_exp_p")
+      "resnet18_exp_1mp"|"resnet18_exp_p")
         # Single alpha parameter
         for alpha in "${ALPHAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|alpha_$alpha|none")
         done
         ;;
-      "resnet50_focal_loss_adaptive"|"resnet50_focal_loss")
+      "resnet18_focal_loss_adaptive"|"resnet18_focal_loss")
         # Single gamma parameter
         for gamma in "${GAMMAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|gamma_$gamma|none")
         done
         ;;
-      "resnet50_generalized_focal")
+      "resnet18_generalized_focal")
         # Both gamma and beta parameters
         for gamma in "${GAMMAS[@]}"; do
           for beta in "${BETAS[@]}"; do
@@ -84,13 +84,13 @@ for seed_idx in "${SEED_DIRS[@]}"; do
           done
         done
         ;;
-      "resnet50_linear"|"resnet50_one_minus_power")
+      "resnet18_linear"|"resnet18_one_minus_power")
         # Single beta parameter
         for beta in "${BETAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|beta_$beta|none")
         done
         ;;
-      "resnet50_log_power")
+      "resnet18_log_power")
         # Single kappa parameter
         for kappa in "${KAPPAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|kappa_$kappa|none")
@@ -106,7 +106,7 @@ TOTAL_JOBS=${#COMBINATIONS[@]}
 # Dynamically determine SLURM_ARRAY_TASK_ID upper bound
 if [ "$DEBUG" = true ]; then
   echo "Total jobs: $TOTAL_JOBS"
-  SLURM_ARRAY_TASK_ID=100
+  SLURM_ARRAY_TASK_ID=0
 fi
 
 if [ -z "$SLURM_ARRAY_TASK_ID" ]; then

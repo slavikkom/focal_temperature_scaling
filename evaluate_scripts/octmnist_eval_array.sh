@@ -5,7 +5,7 @@
 # sbatch --array=0-<total_jobs> cifar10_slurm_array2.job
 
 #SBATCH --job-name=eval_octmnist
-#SBATCH --output=slurm_logs_octmnist/eval_job_%A_%a.out
+#SBATCH --output=slurm_logs_octmnist_lr05/eval_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
@@ -37,8 +37,8 @@ SMOKE_ARG="" # --smoke-test for quick check or empty string for full run
 GPU_FLAG="-g"
 DEBUG=false # set to true for debugging which won't run the evaluation only to debug this script by printouts
 
-SAVE_BASE="../MODEL_DIRECTORY/OCTMNIST"
-EVAL_BASE="../RESULTS/OCTMNIST_epoch${EPOCH}"
+SAVE_BASE="../MODEL_DIRECTORY/OCTMNIST_LR05"
+EVAL_BASE="../RESULTS/OCTMNIST_LR05_epoch${EPOCH}"
 
 mkdir -p "$EVAL_BASE"
 
