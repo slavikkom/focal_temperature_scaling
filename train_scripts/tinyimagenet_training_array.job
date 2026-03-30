@@ -2,6 +2,7 @@
 #SBATCH --job-name=ti
 #SBATCH --output=slurm_logs_tinyimagenet/job_%A_%a.out
 #SBATCH --partition=gpu
+#SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=14:00:00
@@ -57,6 +58,7 @@ if [ "$TRAIN_MODE" == "scratch" ]; then
         --dataset-root ../TINY_IMAGENET_DIRECTORY \
         --first-milestone 40 \
         --second-milestone 60 \
+        --save-interval 25 \
         -e 100 \
         -b 64 \
         -tb 64 \
@@ -73,6 +75,7 @@ elif [ "$TRAIN_MODE" == "continue" ]; then
         --dataset-root ../TINY_IMAGENET_DIRECTORY \
         --first-milestone 40 \
         --second-milestone 60 \
+        --save-interval 25 \
         -e 100 \
         -b 64 \
         -tb 64 \
