@@ -549,6 +549,7 @@ min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 show_unsorted = True if N > 1 else False
 with_calibration_baselines = True
 use_paired_loss_link = True # if True, match loss and calibration link; if False, use original behavior
+use_paired_loss_link_value = True # if True, also require loss param and link value to match
 
 # Create a mapping from display_name to link_name for paired matching
 display_name_to_link = {
@@ -567,11 +568,22 @@ for metric in ['ECE_val', 'Logloss_val']:
         matching_indices = []
         for loss_idx in df_paper_tmp.index:
             loss_name = loss_idx[0]  # Get the Loss level value
+            loss_param = loss_idx[1] # Get the Param level value
             link_name = loss_idx[2]  # Get the Link level value
+            link_value = loss_idx[3] # Get the Value level value
             
             # Check if this loss and link correspond
             expected_link = link_functions[display_name_to_link[loss_name]]
-            if link_name == expected_link:
+            link_matches = (link_name == expected_link)
+
+            value_matches = True
+            if use_paired_loss_link_value:
+                try:
+                    value_matches = np.isclose(float(loss_param), float(link_value))
+                except (TypeError, ValueError):
+                    value_matches = (loss_param == link_value)
+
+            if link_matches and value_matches:
                 matching_indices.append(loss_idx)
         
         df_to_filter = df_paper_tmp.loc[matching_indices]
