@@ -109,7 +109,8 @@ def loss_function_save_name(loss_function,
                             + '_gamma_' + str(gamma),
         'log_power':          'log_power_kappa_' + str(gamma),     
         # random loss
-        'random_loss':             'random_loss_seed_' + str(seed)
+        'random_loss':             'random_loss_seed_' + str(seed),
+        'proper_focal_loss':        'proper_focal_loss_gamma_' + str(gamma)
     }
     if (loss_function == 'focal_loss' and scheduled == True):
         res_str = 'focal_loss_scheduled_gamma_' + str(gamma1) + '_' + str(gamma2) + '_' + str(gamma3)

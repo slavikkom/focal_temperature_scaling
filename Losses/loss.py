@@ -15,6 +15,7 @@ from Losses.mmce import MMCE, MMCE_weighted
 from Losses.brier_score import BrierScore
 from Losses.new_losses import LinearDecayLoss, ExpPLoss, Exp1mpLoss, OneMinusPowerLoss, GeneralizedFocalLoss, LogPowerLoss
 from Losses.random_loss import ModulatedCELoss
+from Losses.proper_focal_loss import ProperFocalLossIFT
 
 def cross_entropy(logits, targets, **kwargs):
     return F.cross_entropy(logits, targets, reduction='sum')
@@ -139,3 +140,15 @@ def random_loss_fn(logits, targets, **kwargs):
     """
     device = kwargs['device']
     return ModulatedCELoss(seed=kwargs['seed']).to(device)(logits, targets)
+
+def proper_focal_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for ProperFocalLossIFT:
+      f(p) = L_FL(phi^{-1}(q), y)  with exact IFT backward.
+    Expects:
+      kwargs['gamma']  → γ
+      kwargs['device'] → torch device
+    """
+    gamma = kwargs['gamma']
+    device = kwargs['device']
+    return ProperFocalLossIFT(gamma=gamma).to(device)(logits, targets)

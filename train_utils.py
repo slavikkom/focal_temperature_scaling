@@ -30,6 +30,7 @@ loss_function_dict = {
     'log_power':           lambda logits, targets, **kwargs: log_power_loss_fn(logits, targets, **kwargs),
     #### random loss ####
     'random_loss':         lambda logits, targets, **kwargs: random_loss_fn(logits, targets, **kwargs),
+    'proper_focal_loss':   lambda logits, targets, **kwargs: proper_focal_loss_fn(logits, targets, **kwargs)
 }
 
 
