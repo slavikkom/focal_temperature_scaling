@@ -90,7 +90,8 @@ def loss_function_save_name(loss_function,
                             gamma2=1.0,
                             gamma3=1.0,
                             lamda=1.0,
-                            beta=1.0):
+                            beta=1.0,
+                            seed=0):
     res_dict = {
         'cross_entropy': 'cross_entropy',
         'focal_loss': 'focal_loss_gamma_' + str(gamma),
@@ -107,6 +108,8 @@ def loss_function_save_name(loss_function,
         'generalized_focal':  'generalized_focal_beta_' + str(beta)    # β via --gamma2, γ via --gamma3
                             + '_gamma_' + str(gamma),
         'log_power':          'log_power_kappa_' + str(gamma),     
+        # random loss
+        'random_loss':             'random_loss_seed_' + str(seed)
     }
     if (loss_function == 'focal_loss' and scheduled == True):
         res_str = 'focal_loss_scheduled_gamma_' + str(gamma1) + '_' + str(gamma2) + '_' + str(gamma3)
@@ -314,7 +317,8 @@ if __name__ == "__main__":
             args.gamma2,
             args.gamma3,
             args.lamda,
-            args.beta
+            args.beta,
+            args.seed
         )
     )
     if args.load:
@@ -327,7 +331,7 @@ if __name__ == "__main__":
             # Define the pattern for the model name
             # TODO: NB! this model loading of the latest saved model found does not take care of the gamma schedule i.e. gamma_schedule=0
             model_loss_str = args.model_name + '_' + \
-                             loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda)
+                             loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed)
             print("string to match: ", model_loss_str)
             model_pattern = re.compile(rf"{model_loss_str}.*_(\d+)\.model$")
             # Search for all model files in the save location
@@ -457,7 +461,8 @@ if __name__ == "__main__":
                                         lamda=args.lamda,
                                         loss_mean=args.loss_mean,
                                         scaler=scaler,
-                                        beta=generalized_focal_beta)
+                                        beta=generalized_focal_beta,
+                                        seed=args.seed,)
         scheduler.step()
         val_loss = test_single_epoch(epoch,
                                      net,
@@ -466,7 +471,8 @@ if __name__ == "__main__":
                                      loss_function=args.loss_function,
                                      gamma=gamma,
                                      lamda=args.lamda,
-                                     beta=generalized_focal_beta)
+                                     beta=generalized_focal_beta,
+                                     seed=args.seed)
         test_loss = test_single_epoch(epoch,
                                       net,
                                       test_loader,
@@ -475,8 +481,13 @@ if __name__ == "__main__":
                                       gamma=gamma,
                                       lamda=args.lamda,
                                       use_amp=use_amp,
-                                      beta=generalized_focal_beta)
+                                      beta=generalized_focal_beta,
+                                      seed=args.seed)
         _, val_acc, _, _, _ = test_classification_net(net, val_loader, device, use_amp=use_amp)
+        _, test_acc, _, _, _ = test_classification_net(net, test_loader, device, use_amp=use_amp)
+
+        print(f"===> validation accuracy: {val_acc:.4f}")
+        print(f"===> test accuracy: {test_acc:.4f}")
 
         training_set_loss[epoch] = train_loss
         val_set_loss[epoch] = val_loss
@@ -489,7 +500,7 @@ if __name__ == "__main__":
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
+                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_best_' + \
                         str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
@@ -499,7 +510,7 @@ if __name__ == "__main__":
                 or ((epoch + 1) == num_epochs)):
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
+                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_' + str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 

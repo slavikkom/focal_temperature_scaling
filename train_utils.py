@@ -28,6 +28,8 @@ loss_function_dict = {
     'one_minus_power':     lambda logits, targets, **kwargs: one_minus_power_loss_fn(logits, targets, **kwargs),
     'generalized_focal':   lambda logits, targets, **kwargs: generalized_focal_loss_fn(logits, targets, **kwargs),
     'log_power':           lambda logits, targets, **kwargs: log_power_loss_fn(logits, targets, **kwargs),
+    #### random loss ####
+    'random_loss':         lambda logits, targets, **kwargs: random_loss_fn(logits, targets, **kwargs),
 }
 
 
@@ -41,7 +43,8 @@ def train_single_epoch(epoch,
                        lamda=1.0,
                        loss_mean=False,
                        scaler=None,
-                       beta=1.0):
+                       beta=1.0,
+                       seed=0):
     '''
     Util method for training a model for a single epoch.
     '''
@@ -59,11 +62,11 @@ def train_single_epoch(epoch,
             with autocast():
                 logits = model(data)
                 if ('mmce' in loss_function):
-                    loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+                    loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device))
                 elif ('generalized_focal' in loss_function):
-                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device)
+                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, seed=seed, device=device)
                 else:
-                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
+                    loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device)
 
                 if loss_mean:
                     loss = loss / len(data)
@@ -76,9 +79,9 @@ def train_single_epoch(epoch,
         else:
             logits = model(data)
             if ('mmce' in loss_function):
-                loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device))
+                loss = (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device))
             else:
-                loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device)
+                loss = loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device)
 
             if loss_mean:
                 loss = loss / len(data)
@@ -110,7 +113,8 @@ def test_single_epoch(epoch,
                       gamma=1.0,
                       lamda=1.0,
                       use_amp=False,
-                      beta=1.0):
+                      beta=1.0,
+                      seed=0):
     '''
     Util method for testing a model for a single epoch.
     '''
@@ -126,19 +130,19 @@ def test_single_epoch(epoch,
                 with autocast():
                     logits = model(data)
                     if ('mmce' in loss_function):
-                        loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                        loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device).item())
                     elif ('generalized_focal' in loss_function):
-                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device).item()
+                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, seed=seed,device=device).item()
                     else:
-                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
+                        loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device).item()
             else:
                 logits = model(data)
                 if ('mmce' in loss_function):
-                    loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item())
+                    loss += (len(data) * loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device).item())
                 elif ('generalized_focal' in loss_function):
-                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, device=device).item()
+                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, beta=beta, lamda=lamda, seed=seed, device=device).item()
                 else:
-                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, device=device).item()
+                    loss += loss_function_dict[loss_function](logits, labels, gamma=gamma, lamda=lamda, seed=seed, device=device).item()
             num_samples += len(data)
 
     print('======> Test set loss: {:.4f}'.format(

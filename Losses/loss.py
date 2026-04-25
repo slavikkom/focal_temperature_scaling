@@ -14,7 +14,7 @@ from Losses.focal_loss_adaptive_gamma import FocalLossAdaptive
 from Losses.mmce import MMCE, MMCE_weighted
 from Losses.brier_score import BrierScore
 from Losses.new_losses import LinearDecayLoss, ExpPLoss, Exp1mpLoss, OneMinusPowerLoss, GeneralizedFocalLoss, LogPowerLoss
-
+from Losses.random_loss import ModulatedCELoss
 
 def cross_entropy(logits, targets, **kwargs):
     return F.cross_entropy(logits, targets, reduction='sum')
@@ -128,3 +128,14 @@ def log_power_loss_fn(logits, targets, **kwargs):
     kappa = kwargs['gamma']
     device = kwargs['device']
     return LogPowerLoss(kappa=kappa, reduction='sum').to(device)(logits, targets)
+
+
+def random_loss_fn(logits, targets, **kwargs):
+    """
+    Wrapper for ModulatedCELoss:
+      f(p) = −log(p) · g(p),  applied to softmax true-class probability.
+    Expects:
+      kwargs['device'] → torch device
+    """
+    device = kwargs['device']
+    return ModulatedCELoss(seed=kwargs['seed']).to(device)(logits, targets)
