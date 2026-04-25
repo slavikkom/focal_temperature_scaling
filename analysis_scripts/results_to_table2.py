@@ -6,11 +6,14 @@ import pandas as pd
 import os
 from results_parser import evaluation_metrics_to_dataframe
 
-dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-dataset_name = 'OCTMNIST' # 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST_LR05' # 'DERMAMNIST' # 'DERMAMNIST_B32' # 'DERMAMNIST_LR05' # 'PATHMNIST'  
+# dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
+dataset_name = 'TINYIMAGENET' 
+# dataset_name = 'OCTMNIST' # 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST_LR05' # 'DERMAMNIST' # 'DERMAMNIST_B32' # 'DERMAMNIST_LR05' # 'PATHMNIST'  
+# dataset_name = 'DERMAMNIST_LR05'  
 FP_str = "_FP32"
 FP_str = "" # FP16
-epoch = "350"
+# epoch = "350"
+epoch = "100"
 random_seeds = [42, 123, 2023]
 # random_seeds = [42]
 # RESULTS_DIR = f'../RESULTS/hpc_results_july/{dataset_name}_epoch{epoch}{FP_str}'
@@ -32,14 +35,14 @@ if dataset_name == "CIFAR10" or dataset_name == "CIFAR100":
 elif dataset_name == "PATHMNIST" or dataset_name == "DERMAMNIST" or dataset_name == "DERMAMNIST_B32" or dataset_name == "DERMAMNIST_LR05" or dataset_name == "OCTMNIST" or dataset_name == "OCTMNIST_LR05" or dataset_name == "ORGANSMNIST" or dataset_name == "TISSUEMNIST":
     model_name = "resnet18"
 elif dataset_name == "TINYIMAGENET":
-    model_name = "ti"
+    model_name = "resnet50_ti"
 else:
     raise ValueError(f"Unknown dataset name: {dataset_name}")
 
 loss_types = {
     "cross_entropy":    {"display_name": "CE",      "prefix": f"{model_name}_cross_entropy", "params": [1.0], "method_name": "Cross-Entropy",                   "link_name": "softmax"},
     "focal_loss":       {"display_name": "Focal",   "prefix": "focal_loss_gamma",            "params": params, "method_name": "Focal  $\\gamma_{{tr}}={param}$", "link_name": "focal"},
-    "linear_loss":      {"display_name": "Linear",  "prefix": f"{model_name}_linear_beta",   "params": params, "method_name": "Linear $\\beta_{{tr}}={param}$",  "link_name": "focal_linear"},
+    "linear_loss":      {"display_name": "Linear",  "prefix": f"ti_linear_beta" if dataset_name == "TINYIMAGENET" else f"{model_name}_linear_beta",   "params": params, "method_name": "Linear $\\beta_{{tr}}={param}$",  "link_name": "focal_linear"},
     "exp_p_loss":       {"display_name": "Expp",    "prefix": "exp_p_alpha",                 "params": params, "method_name": "Exp    $\\alpha_{{tr}}={param}$", "link_name": "exp_p"}, 
     "exp_1mp_loss":     {"display_name": "Exp1mp",  "prefix": "exp_1mp_alpha",               "params": params, "method_name": "Exp1mp $\\alpha_{{tr}}={param}$", "link_name": "exp_1mp"}, 
     "minus_power_loss": {"display_name": "MinusPow","prefix": "minus_power_beta",            "params": params, "method_name": "MinPow $\\beta_{{tr}}={param}$",  "link_name": "one_minus_power"},
@@ -96,7 +99,7 @@ for loss_type, details in loss_types.items():
 # assert len(file_names) == len(method_names), "File names and method names lists must have the same length."
 
 # Initialize the DataFrame for the table
-df_paper = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'Logloss*', 'ECE', 'ECE*']) # for latex print out
+df_paper = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'Logloss$_{T=1}$', 'ECE', 'ECE$_{T=1}$']) # for latex print out
 df_paper_tmp = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'ECE'])  # for choosing best performing method
 
 # Number of link functions (used for inserting \hline)
@@ -273,9 +276,9 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'Accuracy': format_string(acc_b_tr, acc_b_tr_std, acc_b_te, acc_b_te_std, float_format='2.1f'),
         # 'Accuracy (w/o ts)': format_string(acc_b_tr_nots, acc_b_tr_std_nots, acc_b_te_nots, acc_b_te_std_nots, float_format='2.1f'),
         'Logloss': format_string(ce_b_tr, ce_b_tr_std, ce_b_te, ce_b_te_std, ce_topt_b),
-        'Logloss*': format_string(ce_b_tr_nots, ce_b_tr_std_nots, ce_b_te_nots, ce_b_te_std_nots),
+        'Logloss$_{T=1}$': format_string(ce_b_tr_nots, ce_b_tr_std_nots, ce_b_te_nots, ce_b_te_std_nots),
         'ECE': format_string(ece_b_tr*100, ece_b_tr_std*100, ece_b_te*100, ece_b_te_std*100, ece_topt_b),
-        'ECE*': format_string(ece_b_tr_nots*100, ece_b_tr_std_nots*100, ece_b_te_nots*100, ece_b_te_std_nots*100),
+        'ECE$_{T=1}$': format_string(ece_b_tr_nots*100, ece_b_tr_std_nots*100, ece_b_te_nots*100, ece_b_te_std_nots*100),
     }
     # temporary to choose best params based on
     row_b_tmp = {
@@ -287,13 +290,13 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
         'Logloss_val': ce_b_val,
         'Logloss_val_std': ce_b_val_std,
         'Logloss': ce_b_te,
-        'Logloss*': ce_b_te_nots,
+        'Logloss$_{T=1}$': ce_b_te_nots,
         'ECE_tr': ece_b_tr*100,
         'ECE_val': ece_b_val*100,
         'ECE_val_std': ece_b_val_std*100,
         'ECE': ece_b_te*100,
         'ECE_std': ece_b_te_std*100,
-        'ECE*': ece_b_te_nots*100,
+        'ECE$_{T=1}$': ece_b_te_nots*100,
     }
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
@@ -441,9 +444,9 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'Approach': f'$+{latex_name}_{{ev}}={best_link_val}$',
             'Accuracy': format_string(acc_tr, acc_tr_std, acc_te, acc_te_std, float_format='2.1f'),
             'Logloss': format_string(ce_tr, ce_tr_std, ce_te, ce_te_std, ce_topt),
-            'Logloss*': format_string(ce_tr_nots, ce_tr_std_nots, ce_te_nots, ce_te_std_nots),
+            'Logloss$_{T=1}$': format_string(ce_tr_nots, ce_tr_std_nots, ce_te_nots, ce_te_std_nots),
             'ECE': format_string(ece_tr*100, ece_tr_std*100, ece_te*100, ece_te_std*100, ece_topt),
-            'ECE*': format_string(ece_tr_nots*100, ece_tr_std_nots*100, ece_te_nots*100, ece_te_std_nots*100),
+            'ECE$_{T=1}$': format_string(ece_tr_nots*100, ece_tr_std_nots*100, ece_te_nots*100, ece_te_std_nots*100),
         }
         row_tmp = {
             'Approach': f'$+{latex_name}_{{ev}}={best_link_val}$',
@@ -454,13 +457,13 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'Logloss_val': ce_val,
             'Logloss_val_std': ce_val_std,
             'Logloss': ce_te,
-            'Logloss*': ce_te_nots,
+            'Logloss$_{T=1}$': ce_te_nots,
             'ECE_tr': ece_tr*100,
             'ECE_val': ece_val*100,
             'ECE_val_std': ece_val_std*100,
             'ECE': ece_te*100,
             'ECE_std': ece_te_std*100,
-            'ECE*': ece_te_nots*100,
+            'ECE$_{T=1}$': ece_te_nots*100,
         }
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
         df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
@@ -504,9 +507,56 @@ df_paper_tmp
 #%
 # df_paper_tmp.groupby(level=['Loss Function'])['Log-Loss'].idxmin()
 
-def transfer_to_latex(df):
-    latex_table = df.to_latex(index=True, float_format="%.2f", na_rep="N/A", escape=False)
+def transfer_to_latex(df, sparsify=True):
+    latex_table = df.to_latex(
+        index=True,
+        float_format="%.2f",
+        na_rep="N/A",
+        escape=False,
+        sparsify=sparsify,
+    )
     return latex_table
+
+
+show_overfitting_logloss = False # if True, append a trainability-table column with test-val / test-tr for Logloss
+show_overfitting_ece = False # if True, append a trainability-table column with test-val / test-tr for ECE
+show_overfitting_accuracy = False # if True, append a trainability-table column with test-val / test-tr for Accuracy
+
+def format_overfitting_string(test, val, train, float_format='2.2f'):
+    return f'{test - val:{float_format}}/{test - train:{float_format}}'
+
+def append_overfitting_columns(result_df, result_tmp_df):
+    if show_overfitting_accuracy:
+        result_df['$\\Delta$Acc'] = result_tmp_df.apply(
+            lambda row: format_overfitting_string(
+                row['Accuracy'],
+                row['Accuracy_val'],
+                row['Accuracy_tr'],
+            ),
+            axis=1,
+        )
+
+    if show_overfitting_logloss:
+        result_df['$\\Delta$Logloss'] = result_tmp_df.apply(
+            lambda row: format_overfitting_string(
+                row['Logloss'],
+                row['Logloss_val'],
+                row['Logloss_tr'],
+            ),
+            axis=1,
+        )
+
+    if show_overfitting_ece:
+        result_df['$\\Delta$ECE'] = result_tmp_df.apply(
+            lambda row: format_overfitting_string(
+                row['ECE'],
+                row['ECE_val'],
+                row['ECE_tr'],
+            ),
+            axis=1,
+        )
+
+    return result_df
 
 # Trainability table
 # choose the best performing method according to the validation set but show the results on the test
@@ -514,17 +564,21 @@ def transfer_to_latex(df):
 # 1. only selected cases that the link is associated to the loss
 # 2. fine the best among those cases
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
+
 for criteria in ['Accuracy_val', 'Logloss_val', 'ECE_val']:
     print(criteria)
     # same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'N/A' 
     same_link_as_loss = df_paper_tmp.index.get_level_values('Link') == 'Softmax' 
     filtered = df_paper_tmp[same_link_as_loss]
     if criteria == 'Accuracy_val':
-        trainability_df = df_paper.loc[filtered.groupby(level=['Loss'])[criteria].idxmax()].drop(columns=['Approach'])
+        selected_idx = filtered.groupby(level=['Loss'])[criteria].idxmax()
     elif criteria == 'ECE_val':
-        trainability_df = df_paper.loc[filtered[filtered['ECE_val'] >= min_acceptable_ECE].groupby(level=['Loss'])[criteria].idxmin()].drop(columns=['Approach'])
+        selected_idx = filtered[filtered['ECE_val'] >= min_acceptable_ECE].groupby(level=['Loss'])[criteria].idxmin()
     else:
-        trainability_df = df_paper.loc[df_paper_tmp[same_link_as_loss].groupby(level=['Loss'])[criteria].idxmin()].drop(columns=['Approach'])
+        selected_idx = df_paper_tmp[same_link_as_loss].groupby(level=['Loss'])[criteria].idxmin()
+    trainability_df = df_paper.loc[selected_idx].drop(columns=['Approach'])
+    trainability_tmp_df = df_paper_tmp.loc[selected_idx]
+    trainability_df = append_overfitting_columns(trainability_df, trainability_tmp_df)
     trainability_df = trainability_df.reset_index(level=['Link', 'Value'], drop=True)
     # trainability_df = trainability_df.sort_values("Accuracy", ascending=False)
     trainability_df = trainability_df.reindex([loss_types[l]['display_name'] for l in loss_types.keys()], level='Loss')
@@ -541,16 +595,59 @@ N=1
 min_acceptable_ECE = 0.005 # filtering ECEs that are zero.
 # ece=0 can happen due to numerical instability of some of the loss functions.
 show_unsorted = True if N > 1 else False
+with_calibration_baselines = True
+use_paired_loss_link = True # if True, match loss and calibration link; if False, use original behavior
+use_paired_loss_link_value = True # if True, also require loss param and link value to match
+
+# Create a mapping from display_name to link_name for paired matching
+display_name_to_link = {
+    loss_types[loss_type]['display_name']: loss_types[loss_type]['link_name']
+    for loss_type in loss_types.keys()
+}
 
 # best according to the validation metrics
 print("Calibration Tables")
 for metric in ['ECE_val', 'Logloss_val']:
     print("Best according to ", metric)
+    
+    # Filter to paired loss-link if enabled
+    df_to_filter = df_paper_tmp.copy()
+    if use_paired_loss_link:
+        matching_indices = []
+        for loss_idx in df_paper_tmp.index:
+            loss_name = loss_idx[0]  # Get the Loss level value
+            loss_param = loss_idx[1] # Get the Param level value
+            link_name = loss_idx[2]  # Get the Link level value
+            link_value = loss_idx[3] # Get the Value level value
+            
+            # Check if this loss and link correspond
+            expected_link = link_functions[display_name_to_link[loss_name]]
+            link_matches = (link_name == expected_link)
+
+            value_matches = True
+            if use_paired_loss_link_value:
+                try:
+                    value_matches = np.isclose(float(loss_param), float(link_value))
+                except (TypeError, ValueError):
+                    value_matches = (loss_param == link_value)
+
+            if link_matches and value_matches:
+                matching_indices.append(loss_idx)
+        
+        df_to_filter = df_paper_tmp.loc[matching_indices]
+        # CE-Softmax is already included as a baseline, so exclude it from non-baseline rows.
+        df_to_filter = df_to_filter.loc[
+            ~(
+                (df_to_filter.index.get_level_values('Loss') == 'CE')
+                & (df_to_filter.index.get_level_values('Link') == 'Softmax')
+            )
+        ]
+    
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
-        df_paper_tmp[(df_paper_tmp[metric] >= min_acceptable_ECE) & \
-                     (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
-                        np.isfinite(df_paper_tmp['Logloss'])]
+        df_to_filter[(df_to_filter[metric] >= min_acceptable_ECE) & \
+                     (df_to_filter[metric] >= 1.2*df_to_filter[metric+'_std']) & \
+                        np.isfinite(df_to_filter['Logloss'])]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
@@ -563,11 +660,125 @@ for metric in ['ECE_val', 'Logloss_val']:
         topN_idx_sorted = topN_idx
 
     calibration_df = df_paper.loc[topN_idx_sorted].drop(columns=['Approach'])
+    calibration_tmp_df = df_paper_tmp.loc[topN_idx_sorted]
+    calibration_df = append_overfitting_columns(calibration_df, calibration_tmp_df)
 
     if N == 1: # preserve same order of losses as the trainability table
         index_level0_trainability_df = df_paper_tmp.index.get_level_values('Loss').unique() 
         calibration_df = calibration_df.loc[index_level0_trainability_df] 
 
-    print(transfer_to_latex(calibration_df))
+    # Baselines: CE with softmax link as baseline 1
+    baseline1_idx = \
+        df_paper_tmp.loc[
+                    (df_paper_tmp.index.get_level_values('Loss') == 'CE') &
+                    (df_paper_tmp.index.get_level_values('Link') == 'Softmax')
+        ].index
+    
+    # Focal with softmax link as baseline 2
+    top1_baseline2_idx = (
+        df_paper_tmp[
+                        (df_paper_tmp.index.get_level_values('Loss') == 'Focal') & \
+                        (df_paper_tmp.index.get_level_values('Link') == 'Softmax') & \
+                        (df_paper_tmp[metric] >= min_acceptable_ECE) & \
+                        (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
+                        np.isfinite(df_paper_tmp['Logloss'])]
+        .groupby(level='Loss')
+        .apply(lambda x: x[metric].nsmallest(N).index)
+        .explode()
+    )
+    
+    baseline1 = df_paper.loc[baseline1_idx].drop(columns=['Approach'])
+    baseline1_tmp = df_paper_tmp.loc[baseline1_idx]
+    baseline1 = append_overfitting_columns(baseline1, baseline1_tmp)
+
+    baseline2 = df_paper.loc[top1_baseline2_idx].drop(columns=['Approach'])
+    baseline2_tmp = df_paper_tmp.loc[top1_baseline2_idx]
+    baseline2 = append_overfitting_columns(baseline2, baseline2_tmp)
+
+    calibration_df_withbaselines = pd.concat([baseline1, baseline2, calibration_df], axis=0)
+
+    if with_calibration_baselines:
+        print(
+            calibration_df_withbaselines.to_latex(
+                index=True,
+                float_format="%.2f",
+                na_rep="N/A",
+                escape=False,
+                sparsify=False,
+            )
+        )
+    else:
+        print(
+            calibration_df.to_latex(
+                index=True,
+                float_format="%.2f",
+                na_rep="N/A",
+                escape=False,
+                sparsify=False,
+            )
+        )
     # display(calibration_df)
 
+
+#%%
+
+# Save the calibration results to excel for sensitivity analysis of hyperparameters
+
+# df_paper_tmp[df_paper_tmp.index.get_level_values('Link') == 'Focal']
+linkvalue_df = df_paper_tmp.groupby(level=['Link', 'Value'])
+# linkvalue_df['ECE'] < linkvalue_df['ECE*']
+# linkvalue_df.count()
+
+# Extract ECE values from the baselines
+ece_baseline1 = df_paper_tmp.loc[baseline1_idx]['ECE'].values
+ece_baseline2 = df_paper_tmp.loc[baseline2.index]['ECE'].values
+
+# Initialize a dictionary to hold counts
+link_comparison = {}
+
+
+# for (link, value), group in df_paper_tmp.groupby(level=['Link', 'Value']):
+#     print(f"Link: {link}, Value: {value}")
+#     print(group[['ECE']])
+#     print("#")
+# Iterate through the DataFrame to calculate fractions
+for (link, value), group in df_paper_tmp.groupby(level=['Link', 'Value']):
+    # Count how many times ECE is lower than baseline1
+    count_lower_baseline1 = (group['ECE'].values < ece_baseline1).sum()
+    total_count_baseline1 = len(group)
+    relative_to_baseline1 = (group['ECE'].values - ece_baseline1).mean() / ece_baseline1
+    
+    # Count how many times ECE is lower than baseline2
+    count_lower_baseline2 = (group['ECE'].values < ece_baseline2).sum()
+    total_count_baseline2 = len(group)
+    relative_to_baseline2 = (group['ECE'].values - ece_baseline2).mean() / ece_baseline2
+    
+    # Calculate the fractions
+    fraction_baseline1 = count_lower_baseline1 / total_count_baseline1 if total_count_baseline1 > 0 else 0
+    fraction_baseline2 = count_lower_baseline2 / total_count_baseline2 if total_count_baseline2 > 0 else 0
+    
+    # Calculate relative change only for cases that improve ECE
+    improved_ece = group['ECE'].values < ece_baseline1
+    relative_change_improved_baseline1 = (group['ECE'][improved_ece].mean() - ece_baseline1) / ece_baseline1 if improved_ece.any() else 0.0
+    
+    improved_ece = group['ECE'].values < ece_baseline2
+    relative_change_improved_baseline2 = (group['ECE'][improved_ece].mean() - ece_baseline2) / ece_baseline2 if improved_ece.any() else 0.0
+    
+    # Store the results
+    link_comparison[(link, value)] = {
+        'Fraction_Baseline1': fraction_baseline1.round(2),
+        'Fraction_Baseline2': fraction_baseline2.round(2),
+        'Relative_to_Baseline1': relative_to_baseline1[0].round(2),
+        'Relative_to_Baseline2': relative_to_baseline2[0].round(2),
+        'Relative_Change_Improved_Baseline1': round(float(relative_change_improved_baseline1), 2),
+        'Relative_Change_Improved_Baseline2': round(float(relative_change_improved_baseline2), 2)
+    }
+
+# Create a summary DataFrame
+summary_df = pd.DataFrame.from_dict(link_comparison, orient='index')
+summary_df.index = pd.MultiIndex.from_tuples(summary_df.index, names=['Link', 'Value'])
+
+# Print the summary table
+print(summary_df.to_excel(f'{dataset_name}_link_improvement_summary.xlsx'))
+
+#%%
