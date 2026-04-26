@@ -76,7 +76,7 @@ models = {
 
 def parseArgs():
     default_dataset = 'cifar10'
-    dataset_root = './data'
+    dataset_root = '../Data/datasets'
     model = 'resnet50'
     save_loc = './'
     save_eval_loc = './'
@@ -251,6 +251,7 @@ if __name__ == "__main__":
             smoke_test=args.smoke_test)
     else:
         train_loader, val_loader = dataset_loader[args.dataset].get_train_valid_loader(
+            data_dir=args.dataset_root,
             batch_size=args.train_batch_size,
             augment=args.data_aug,
             random_seed=args.seed,
@@ -259,6 +260,7 @@ if __name__ == "__main__":
         )
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
+            data_dir=args.dataset_root,
             batch_size=args.test_batch_size,
             pin_memory=args.gpu,
             smoke_test=args.smoke_test

@@ -3,9 +3,11 @@ __pycache__
 tiny-imagenet-200
 *.model
 TINY_IMAGENET_DIRECTORY/
+Data/datasets
 MODEL_DIRECTORY/
 evaluate_scripts/**/*.json
 evaluate_scripts/**/*.txt
+evaluate_scripts/*.npz
 *.zip
 *.out
 
@@ -15,3 +17,6 @@ train_scripts/*.txt
 analysis_scripts/**/*.xlsx
 
 *.png
+train_scripts/*.npz
+train_scripts/data/
+analysis_scripts/**/*.xlsx

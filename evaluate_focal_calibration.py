@@ -4,7 +4,7 @@ from torch.nn import functional as F
 import numpy as np
 
 from temperature_scaling import ModelWithTemperature
-from Metrics.metrics import AdaptiveECELoss
+from Metrics.metrics import AdaptiveECELoss, SmoothECELoss
 from temperature_scaling import multi_focal_link
 from new_links import linear_invlink, multi_link
 
@@ -39,9 +39,15 @@ def evaluate(y_true, probs, num_classes=10):
     log_loss_criterion = nn.NLLLoss()
         
     calibration_criterion = AdaptiveECELoss(return_stats=True)
+    smooth_calibration_criterion = SmoothECELoss(return_sigma=True)
+    fixed_smooth_calibration_criterion = SmoothECELoss(bandwidth=0.05)
         
     epoch_loss['CE'] = log_loss_criterion(torch.log(probs), y_true.long()).item()
     epoch_loss['ECE'] = calibration_criterion(probs, y_true.long())
+    sm_ece, sm_ece_sigma = smooth_calibration_criterion(probs, y_true.long())
+    epoch_loss['smECE'] = sm_ece.item()
+    epoch_loss['smECE_sigma'] = sm_ece_sigma
+    epoch_loss['smECE_0.05'] = fixed_smooth_calibration_criterion(probs, y_true.long()).item()
         
     epoch_loss['Brier'] = mse_loss(probs, torch.nn.functional.one_hot(y_true.long(), num_classes=num_classes).float()).item()
     epoch_loss['ACC'] = multi_acc(probs, y_true)

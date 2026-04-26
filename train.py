@@ -85,14 +85,16 @@ models = {
 
 def loss_function_save_name(loss_function,
                             scheduled=False,
+                            label_smoothing=0.0,
                             gamma=1.0,
                             gamma1=1.0,
                             gamma2=1.0,
                             gamma3=1.0,
                             lamda=1.0,
-                            beta=1.0):
+                            beta=1.0,
+                            seed=0):
     res_dict = {
-        'cross_entropy': 'cross_entropy',
+        'cross_entropy': 'cross_entropy' + ('_' + str(label_smoothing) if label_smoothing > 0.0 else ''),
         'focal_loss': 'focal_loss_gamma_' + str(gamma),
         'focal_loss_adaptive': 'focal_loss_adaptive_gamma_' + str(gamma),
         'mmce': 'mmce_lamda_' + str(lamda),
@@ -107,6 +109,9 @@ def loss_function_save_name(loss_function,
         'generalized_focal':  'generalized_focal_beta_' + str(beta)    # β via --gamma2, γ via --gamma3
                             + '_gamma_' + str(gamma),
         'log_power':          'log_power_kappa_' + str(gamma),     
+        # random loss
+        'random_loss':             'random_loss_seed_' + str(seed),
+        'proper_focal_loss':        'proper_focal_loss_gamma_' + str(gamma)
     }
     if (loss_function == 'focal_loss' and scheduled == True):
         res_str = 'focal_loss_scheduled_gamma_' + str(gamma1) + '_' + str(gamma2) + '_' + str(gamma3)
@@ -117,7 +122,7 @@ def loss_function_save_name(loss_function,
 
 def parseArgs():
     default_dataset = 'cifar10'
-    dataset_root = './data/'
+    dataset_root = '../Data/datasets/'
     train_batch_size = 128
     test_batch_size = 128
     learning_rate = 0.1
@@ -184,6 +189,9 @@ def parseArgs():
     parser.add_argument("--loss-mean", action="store_true", dest="loss_mean",
                         help="whether to take mean of loss instead of sum to train")
     parser.set_defaults(loss_mean=False)
+    parser.add_argument("--label-smoothing", type=float, default=0.0,
+                    dest="label_smoothing",
+                    help="Label smoothing value for cross entropy loss")
     parser.add_argument("--gamma", type=float, default=gamma,
                         dest="gamma", help="Gamma for focal components")
     parser.add_argument("--gamma2", type=float, default=gamma2,
@@ -252,6 +260,9 @@ if __name__ == "__main__":
 
     args = parseArgs()
     set_seed(args.seed)
+    print(f"label smoothing: {args.label_smoothing}")
+    if args.label_smoothing < 0.0 or args.label_smoothing > 1.0:
+        raise ValueError("--label-smoothing must be between 0.0 and 1.0")
 
     if args.smoke_test:
         print("Running in smoke test mode...")
@@ -289,6 +300,9 @@ if __name__ == "__main__":
     if args.model_name is None:
         args.model_name = args.model
 
+    # Ensure the save directory exists upfront for checkpoints and logs.
+    os.makedirs(args.save_loc, exist_ok=True)
+
     if args.gpu is True:
         net.cuda()
         net = torch.nn.DataParallel(
@@ -297,6 +311,25 @@ if __name__ == "__main__":
 
     start_epoch = 0
     num_epochs = args.epoch
+    best_save_after_epoch = max(1, min(50 if args.dataset == "tiny_imagenet" else 250, num_epochs))
+    periodic_save_after_epoch = max(1, min(50 if args.dataset == "tiny_imagenet" else 100, num_epochs))
+
+    run_prefix = os.path.join(
+        args.save_loc,
+        args.model_name + '_' +
+        loss_function_save_name(
+            args.loss_function,
+            args.gamma_schedule,
+            args.label_smoothing,
+            args.gamma,
+            args.gamma,
+            args.gamma2,
+            args.gamma3,
+            args.lamda,
+            args.beta,
+            args.seed
+        )
+    )
     if args.load:
         # net.load_state_dict(torch.load(args.save_loc + args.saved_model_name))
         # start_epoch = int(args.saved_model_name[args.saved_model_name.rfind('_')+1:args.saved_model_name.rfind('.model')])
@@ -307,7 +340,7 @@ if __name__ == "__main__":
             # Define the pattern for the model name
             # TODO: NB! this model loading of the latest saved model found does not take care of the gamma schedule i.e. gamma_schedule=0
             model_loss_str = args.model_name + '_' + \
-                             loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda)
+                             loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed)
             print("string to match: ", model_loss_str)
             model_pattern = re.compile(rf"{model_loss_str}.*_(\d+)\.model$")
             # Search for all model files in the save location
@@ -404,7 +437,8 @@ if __name__ == "__main__":
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test
         )
 
     training_set_loss = {}
@@ -433,30 +467,40 @@ if __name__ == "__main__":
                                         optimizer,
                                         device,
                                         loss_function=args.loss_function,
+                                        label_smoothing=args.label_smoothing,
                                         gamma=gamma,
                                         lamda=args.lamda,
                                         loss_mean=args.loss_mean,
                                         scaler=scaler,
-                                        beta=generalized_focal_beta)
+                                        beta=generalized_focal_beta,
+                                        seed=args.seed,)
         scheduler.step()
         val_loss = test_single_epoch(epoch,
                                      net,
                                      val_loader,
                                      device,
                                      loss_function=args.loss_function,
+                                     label_smoothing=args.label_smoothing,
                                      gamma=gamma,
                                      lamda=args.lamda,
-                                     beta=generalized_focal_beta)
+                                     beta=generalized_focal_beta,
+                                     seed=args.seed)
         test_loss = test_single_epoch(epoch,
                                       net,
                                       test_loader,
                                       device,
                                       loss_function=args.loss_function,
+                                      label_smoothing=args.label_smoothing,
                                       gamma=gamma,
                                       lamda=args.lamda,
                                       use_amp=use_amp,
-                                      beta=generalized_focal_beta)
+                                      beta=generalized_focal_beta,
+                                      seed=args.seed)
         _, val_acc, _, _, _ = test_classification_net(net, val_loader, device, use_amp=use_amp)
+        _, test_acc, _, _, _ = test_classification_net(net, test_loader, device, use_amp=use_amp)
+
+        print(f"===> validation accuracy: {val_acc:.4f}")
+        print(f"===> test accuracy: {test_acc:.4f}")
 
         training_set_loss[epoch] = train_loss
         val_set_loss[epoch] = val_loss
@@ -464,36 +508,34 @@ if __name__ == "__main__":
         val_set_err[epoch] = 1 - val_acc
 
 
-        # Ensure the save directory exists
-        if not os.path.exists(args.save_loc):
-            os.makedirs(args.save_loc)
-
-        if val_acc > best_val_acc and epoch >= 250:  # Save only if validation accuracy improves and after 250 epochs
+        if val_acc > best_val_acc and (epoch + 1) >= best_save_after_epoch:
             best_val_acc = val_acc
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
+                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_best_' + \
                         str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
-        if (((epoch + 1) % args.save_interval == 0) and (epoch > 100)) or args.smoke_test:
+        if ((((epoch + 1) % args.save_interval == 0) and ((epoch + 1) >= periodic_save_after_epoch))
+                or args.smoke_test
+                or ((epoch + 1) == num_epochs)):
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta) + \
+                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_' + str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
 
-    with open(save_name[:save_name.rfind('_')] + '_train_loss.json', 'a') as f:
+    with open(run_prefix + '_train_loss.json', 'w') as f:
         json.dump(training_set_loss, f)
 
-    with open(save_name[:save_name.rfind('_')] + '_val_loss.json', 'a') as fv:
+    with open(run_prefix + '_val_loss.json', 'w') as fv:
         json.dump(val_set_loss, fv)
 
-    with open(save_name[:save_name.rfind('_')] + '_test_loss.json', 'a') as ft:
+    with open(run_prefix + '_test_loss.json', 'w') as ft:
         json.dump(test_set_loss, ft)
 
-    with open(save_name[:save_name.rfind('_')] + '_val_error.json', 'a') as ft:
+    with open(run_prefix + '_val_error.json', 'w') as ft:
         json.dump(val_set_err, ft)

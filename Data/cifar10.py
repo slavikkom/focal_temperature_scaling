@@ -16,6 +16,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 def get_train_valid_loader(batch_size,
                            augment,
                            random_seed,
+                           data_dir='./data',
                            valid_size=0.1,
                            shuffle=True,
                            num_workers=4,
@@ -71,7 +72,7 @@ def get_train_valid_loader(batch_size,
         ])
 
     # load the dataset
-    data_dir = './data'
+    # data_dir = './data'
 
     train_dataset = datasets.CIFAR10(
         root=data_dir, train=True,
@@ -128,6 +129,7 @@ def get_train_valid_loader(batch_size,
 
 
 def get_test_loader(batch_size,
+                    data_dir='./data',
                     shuffle=True,
                     num_workers=4,
                     pin_memory=False,
@@ -158,7 +160,7 @@ def get_test_loader(batch_size,
         normalize,
     ])
 
-    data_dir = './data'
+    # data_dir = './data'
     dataset = datasets.CIFAR10(
         root=data_dir, train=False,
         download=True, transform=transform,

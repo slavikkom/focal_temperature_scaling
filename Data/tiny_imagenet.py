@@ -42,14 +42,21 @@ class TinyImageNet(Dataset):
         A (series) of valid transformation(s).
     in_memory: bool
         Set to True if there is enough memory (about 5G) and want to minimize disk IO overhead.
+    val_based_test: bool
+        If True and split='test', uses the second half of validation set as test.
+        If False and split='test', uses the original test split (which has no labels).
+        Default is True.
     """
-    def __init__(self, root, split='train', transform=None, target_transform=None, in_memory=False):
+    def __init__(self, root, split='train', transform=None, target_transform=None, in_memory=False, val_based_test=True):
         self.root = os.path.expanduser(root)
         self.split = split
         self.transform = transform
         self.target_transform = target_transform
         self.in_memory = in_memory
-        self.split_dir = os.path.join(root, self.split)
+        self.val_based_test = val_based_test
+        # If val_based_test is True and split is 'test', actually load from 'val'
+        actual_split = 'val' if (split == 'test' and val_based_test) else split
+        self.split_dir = os.path.join(root, actual_split)
         self.image_paths = sorted(glob.iglob(os.path.join(self.split_dir, '**', '*.%s' % EXTENSION), recursive=True))
         self.labels = {}  # fname - label number mapping
         self.images = []  # used for in-memory processing
@@ -69,6 +76,17 @@ class TinyImageNet(Dataset):
                     terms = line.split('\t')
                     file_name, label_text = terms[0], terms[1]
                     self.labels[file_name] = self.label_text_to_number[label_text]
+        elif self.split == 'test':
+            if val_based_test:
+                # When using val-based test split, load validation labels
+                with open(os.path.join(self.split_dir, VAL_ANNOTATION_FILE), 'r') as fp:
+                    for line in fp.readlines():
+                        terms = line.split('\t')
+                        file_name, label_text = terms[0], terms[1]
+                        self.labels[file_name] = self.label_text_to_number[label_text]
+            else:
+                # Original test split does not have labels
+                pass
 
         # read all images into torch tensor in memory to minimize disk IO overhead
         if self.in_memory:
@@ -85,7 +103,8 @@ class TinyImageNet(Dataset):
         else:
             img = self.read_image(file_path)
 
-        if self.split == 'test':
+        if self.split == 'test' and not self.val_based_test:
+            # Only return image without label for original test split
             return img
         else:
             # file_name = file_path.split('/')[-1]
@@ -116,7 +135,8 @@ def get_data_loader(root,
                     shuffle=True,
                     num_workers=4,
                     pin_memory=False,
-                    smoke_test=False):
+                    smoke_test=False,
+                    val_based_test=True):
     """
     Utility function for loading and returning train and valid
     multi-process iterators over the Tiny Imagenet dataset. A sample
@@ -131,6 +151,8 @@ def get_data_loader(root,
     - num_workers: number of subprocesses to use when loading the dataset.
     - pin_memory: whether to copy tensors into CUDA pinned memory. Set it to
       True if using GPU.
+    - val_based_test: if True, test split uses second half of validation set.
+      If False, test split uses original test data (no labels). Default is True.
     Returns
     -------
     - train_loader: training set iterator.
@@ -157,16 +179,39 @@ def get_data_loader(root,
     # load the dataset
     data_dir = root
 
-    if (split == 'train'):
+    if split == 'train':
         dataset = TinyImageNet(data_dir,
                                split='train',
                                transform=train_transform,
                                in_memory=True)
-    else:
+    elif split == 'val':
         dataset = TinyImageNet(data_dir,
                                split='val',
                                transform=val_test_transform,
-                               in_memory=True)
+                               in_memory=True,
+                               val_based_test=val_based_test)
+        # If using val_based_test, use only the first half of validation set
+        if val_based_test:
+            val_size = len(dataset)
+            val_indices = np.arange(val_size // 2)
+            dataset = torch.utils.data.Subset(dataset, val_indices)
+    elif split == 'test':
+        dataset = TinyImageNet(data_dir,
+                               split='test',
+                               transform=val_test_transform,
+                               in_memory=True,
+                               val_based_test=val_based_test)
+        # If using val_based_test, use only the second half of validation set
+        if val_based_test:
+            # Get the full validation dataset first to determine size
+            full_val_dataset = TinyImageNet(data_dir,
+                                           split='val',
+                                           transform=val_test_transform,
+                                           in_memory=True,
+                                           val_based_test=True)
+            val_size = len(full_val_dataset)
+            test_indices = np.arange(val_size // 2, val_size)
+            dataset = torch.utils.data.Subset(dataset, test_indices)
 
     if smoke_test:
         indices = np.arange(100)  # Use only the first 100 samples
@@ -175,7 +220,7 @@ def get_data_loader(root,
 
     data_loader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size,
-        num_workers=num_workers, pin_memory=pin_memory, shuffle=True
+        num_workers=num_workers, pin_memory=pin_memory, shuffle=shuffle
     )
 
     return data_loader
