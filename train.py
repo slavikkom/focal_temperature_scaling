@@ -85,6 +85,7 @@ models = {
 
 def loss_function_save_name(loss_function,
                             scheduled=False,
+                            label_smoothing=0.0,
                             gamma=1.0,
                             gamma1=1.0,
                             gamma2=1.0,
@@ -93,7 +94,7 @@ def loss_function_save_name(loss_function,
                             beta=1.0,
                             seed=0):
     res_dict = {
-        'cross_entropy': 'cross_entropy',
+        'cross_entropy': 'cross_entropy' + ('_' + str(label_smoothing) if label_smoothing > 0.0 else ''),
         'focal_loss': 'focal_loss_gamma_' + str(gamma),
         'focal_loss_adaptive': 'focal_loss_adaptive_gamma_' + str(gamma),
         'mmce': 'mmce_lamda_' + str(lamda),
@@ -188,6 +189,9 @@ def parseArgs():
     parser.add_argument("--loss-mean", action="store_true", dest="loss_mean",
                         help="whether to take mean of loss instead of sum to train")
     parser.set_defaults(loss_mean=False)
+    parser.add_argument("--label-smoothing", type=float, default=0.0,
+                    dest="label_smoothing",
+                    help="Label smoothing value for cross entropy loss")
     parser.add_argument("--gamma", type=float, default=gamma,
                         dest="gamma", help="Gamma for focal components")
     parser.add_argument("--gamma2", type=float, default=gamma2,
@@ -256,6 +260,9 @@ if __name__ == "__main__":
 
     args = parseArgs()
     set_seed(args.seed)
+    print(f"label smoothing: {args.label_smoothing}")
+    if args.label_smoothing < 0.0 or args.label_smoothing > 1.0:
+        raise ValueError("--label-smoothing must be between 0.0 and 1.0")
 
     if args.smoke_test:
         print("Running in smoke test mode...")
@@ -313,6 +320,7 @@ if __name__ == "__main__":
         loss_function_save_name(
             args.loss_function,
             args.gamma_schedule,
+            args.label_smoothing,
             args.gamma,
             args.gamma,
             args.gamma2,
@@ -332,7 +340,7 @@ if __name__ == "__main__":
             # Define the pattern for the model name
             # TODO: NB! this model loading of the latest saved model found does not take care of the gamma schedule i.e. gamma_schedule=0
             model_loss_str = args.model_name + '_' + \
-                             loss_function_save_name(args.loss_function, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed)
+                             loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed)
             print("string to match: ", model_loss_str)
             model_pattern = re.compile(rf"{model_loss_str}.*_(\d+)\.model$")
             # Search for all model files in the save location
@@ -429,7 +437,8 @@ if __name__ == "__main__":
 
         test_loader = dataset_loader[args.dataset].get_test_loader(
             batch_size=args.test_batch_size,
-            pin_memory=args.gpu
+            pin_memory=args.gpu,
+            smoke_test=args.smoke_test
         )
 
     training_set_loss = {}
@@ -458,6 +467,7 @@ if __name__ == "__main__":
                                         optimizer,
                                         device,
                                         loss_function=args.loss_function,
+                                        label_smoothing=args.label_smoothing,
                                         gamma=gamma,
                                         lamda=args.lamda,
                                         loss_mean=args.loss_mean,
@@ -470,6 +480,7 @@ if __name__ == "__main__":
                                      val_loader,
                                      device,
                                      loss_function=args.loss_function,
+                                     label_smoothing=args.label_smoothing,
                                      gamma=gamma,
                                      lamda=args.lamda,
                                      beta=generalized_focal_beta,
@@ -479,6 +490,7 @@ if __name__ == "__main__":
                                       test_loader,
                                       device,
                                       loss_function=args.loss_function,
+                                      label_smoothing=args.label_smoothing,
                                       gamma=gamma,
                                       lamda=args.lamda,
                                       use_amp=use_amp,
@@ -501,7 +513,7 @@ if __name__ == "__main__":
             print('New best error: %.4f' % (1 - best_val_acc))
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
+                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_best_' + \
                         str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
@@ -511,7 +523,7 @@ if __name__ == "__main__":
                 or ((epoch + 1) == num_epochs)):
             save_name = args.save_loc + \
                         args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
+                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
                         '_' + str(epoch + 1) + '.model'
             torch.save(net.state_dict(), save_name)
 
