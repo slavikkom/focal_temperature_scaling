@@ -238,6 +238,74 @@ class AdaptiveECELoss(nn.Module):
             return stats_dict
         return ece
 
+class SmoothECELoss(nn.Module):
+    '''
+    Compute smooth ECE with a Gaussian kernel over prediction confidences.
+
+    This avoids hard bin boundaries by estimating local accuracy and confidence
+    around each example's confidence, then averaging their absolute gap.
+    '''
+    def __init__(self, bandwidth=None, chunk_size=2048, eps=0.001, search_refine=10,
+                 return_sigma=False):
+        super(SmoothECELoss, self).__init__()
+        self.bandwidth = bandwidth
+        self.chunk_size = chunk_size
+        self.eps = eps
+        self.search_refine = search_refine
+        self.return_sigma = return_sigma
+
+    def _smooth_ece(self, confidences, accuracies, bandwidth):
+        smoothed_gaps = []
+
+        for start in range(0, confidences.numel(), self.chunk_size):
+            end = min(start + self.chunk_size, confidences.numel())
+            chunk_confidences = confidences[start:end]
+
+            distances = chunk_confidences.unsqueeze(1) - confidences.unsqueeze(0)
+            weights = torch.exp(-0.5 * (distances / bandwidth).pow(2))
+            weight_sums = weights.sum(dim=1).clamp_min(1e-12)
+
+            local_accuracy = torch.matmul(weights, accuracies) / weight_sums
+            local_confidence = torch.matmul(weights, confidences) / weight_sums
+            smoothed_gaps.append(torch.abs(local_accuracy - local_confidence))
+
+        return torch.cat(smoothed_gaps).mean()
+
+    def _find_bandwidth(self, confidences, accuracies):
+        def predicate(alpha):
+            if alpha < self.eps:
+                return True
+            return alpha < self._smooth_ece(confidences, accuracies, alpha).item()
+
+        if predicate(1.0):
+            return 1.0
+
+        start, end = 1.0, 0.0
+        for _ in range(self.search_refine):
+            midpoint = (start + end) / 2.0
+            if predicate(midpoint):
+                end = midpoint
+            else:
+                start = midpoint
+        return max(start, self.eps)
+
+    def forward(self, softmaxes, labels):
+        confidences, predictions = torch.max(softmaxes, 1)
+        accuracies = predictions.eq(labels).float()
+
+        confidences = confidences.float()
+        accuracies = accuracies.float()
+
+        bandwidth = self.bandwidth
+        if bandwidth is None:
+            with torch.no_grad():
+                bandwidth = self._find_bandwidth(confidences, accuracies)
+
+        ece = self._smooth_ece(confidences, accuracies, bandwidth)
+        if self.return_sigma:
+            return ece, float(bandwidth)
+        return ece
+
 class ClasswiseECELoss(nn.Module):
     '''
     Compute Classwise ECE
