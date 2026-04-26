@@ -13,3 +13,5 @@ RESULTS/
 
 train_scripts/*.txt 
 analysis_scripts/**/*.xlsx
+
+*.png
