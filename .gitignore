@@ -20,3 +20,5 @@ analysis_scripts/**/*.xlsx
 train_scripts/*.npz
 train_scripts/data/
 analysis_scripts/**/*.xlsx
+
+*.npy
