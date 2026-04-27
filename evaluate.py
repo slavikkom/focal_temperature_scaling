@@ -10,6 +10,7 @@ import torch.backends.cudnn as cudnn
 
 # Import dataloaders
 import Data.cifar10 as cifar10
+import Data.cifar10_c as cifar10_c
 import Data.cifar100 as cifar100
 import Data.tiny_imagenet as tiny_imagenet
 import Data.medmnist_loader as get_medmnist_data_loader
@@ -47,6 +48,7 @@ medmnist_datasets = [
 # Dataset params
 dataset_num_classes = {
     'cifar10': 10,
+    'cifar10_c': 10,
     'cifar100': 100,
     'tiny_imagenet': 200,
 }
@@ -56,6 +58,7 @@ for name in medmnist_datasets:
 
 dataset_loader = {
     'cifar10': cifar10,
+    'cifar10_c': cifar10_c,
     'cifar100': cifar100,
     'tiny_imagenet': tiny_imagenet,
 }
@@ -120,6 +123,12 @@ def parseArgs():
                         dest="test_batch_size", help="Test Batch size")
     parser.add_argument("--cverror", type=str, default=cross_validation_error,
                         dest="cross_validation_error", help='Error function to do temp scaling')
+    parser.add_argument("--corruption", type=str, default="gaussian_noise",
+                        dest="corruption",
+                        help="CIFAR-10-C corruption to evaluate, or 'all'")
+    parser.add_argument("--severity", type=str, default="1",
+                        dest="severity",
+                        help="CIFAR-10-C severity level 1-5, or 'all'")
     parser.add_argument("-log", action="store_true", dest="log",
                         help="whether to print log data")
 
@@ -259,12 +268,17 @@ if __name__ == "__main__":
             smoke_test=args.smoke_test
         )
 
-        test_loader = dataset_loader[args.dataset].get_test_loader(
-            data_dir=args.dataset_root,
-            batch_size=args.test_batch_size,
-            pin_memory=args.gpu,
-            smoke_test=args.smoke_test
-        )
+        test_loader_kwargs = {
+            "data_dir": args.dataset_root,
+            "batch_size": args.test_batch_size,
+            "pin_memory": args.gpu,
+            "smoke_test": args.smoke_test,
+        }
+        if args.dataset == 'cifar10_c':
+            test_loader_kwargs["corruption"] = args.corruption
+            test_loader_kwargs["severity"] = args.severity
+
+        test_loader = dataset_loader[args.dataset].get_test_loader(**test_loader_kwargs)
 
     model = models[model_name]
 
