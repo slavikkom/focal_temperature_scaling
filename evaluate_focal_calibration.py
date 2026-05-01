@@ -65,7 +65,19 @@ def get_probs(logits, T=1, a=1, link='softmax'):
         probs = multi_link(logits / T, link, a)
     return probs
 
-def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None):
+def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None, links=None):
+    if links is None or "all" in links:
+        active_link_dict = link_dict
+    else:
+        unknown_links = [link for link in links if link not in link_dict]
+        if unknown_links:
+            raise ValueError(
+                "Unknown calibration link(s): {}. Valid links are: {}".format(
+                    ", ".join(unknown_links), ", ".join(link_dict.keys())
+                )
+            )
+        active_link_dict = {link: link_dict[link] for link in links}
+
     calib_states = ('calibrated', 'uncalibrated')
     datasets = ['val', 'test']
     if train_logits is not None:
@@ -82,13 +94,13 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
         evaluation_metrics[data_set]['uncalibrated'] = {}
         for T_metric in ['ce', 'ece']:
             evaluation_metrics[data_set]['calibrated'][T_metric] = {}
-            for link_name in link_dict:
+            for link_name in active_link_dict:
                 evaluation_metrics[data_set]['calibrated'][T_metric][link_name] = {}
                 evaluation_metrics[data_set]['uncalibrated'][link_name] = {}
 
-    for link_name in link_dict:
+    for link_name in active_link_dict:
         gamma_dict[link_name] = {}
-        for link_value in link_dict[link_name]:
+        for link_value in active_link_dict[link_name]:
             if isinstance(link_value, tuple):
                 # Round each element, then join with underscore
                 key = "_".join(str(round(v, 2)) for v in link_value)
@@ -97,8 +109,8 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                 key = str(round(link_value, 2))
             gamma_dict[link_name][key] = {}
 
-    for link_name in link_dict:
-        for link_value in link_dict[link_name]:
+    for link_name in active_link_dict:
+        for link_value in active_link_dict[link_name]:
 
             if isinstance(link_value, tuple):
                 # Round each element, then join with underscore

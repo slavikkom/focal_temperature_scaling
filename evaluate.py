@@ -123,6 +123,10 @@ def parseArgs():
                         dest="test_batch_size", help="Test Batch size")
     parser.add_argument("--cverror", type=str, default=cross_validation_error,
                         dest="cross_validation_error", help='Error function to do temp scaling')
+    parser.add_argument("--links", nargs="+", default=None,
+                        help="Calibration links to evaluate. Choices: all, {}. Omit to evaluate all links.".format(
+                            ", ".join(link_dict.keys())
+                        ))
     parser.add_argument("--corruption", type=str, default="gaussian_noise",
                         dest="corruption",
                         help="CIFAR-10-C corruption to evaluate, or 'all'")
@@ -152,10 +156,12 @@ def get_logits_labels(data_loader, net, device):
     logits_list = []
     labels_list = []
     net.eval()
-    with torch.no_grad():
+    # use inference mode to avoid extra book keeping overhead of autograd in eval mode
+    # also make data loading non-blocking/asynchronous to speed up data transfer to GPU 
+    with torch.inference_mode():
         for data, label in data_loader:
             # data = data.cuda()
-            data = data.to(device)
+            data = data.to(device, non_blocking=True)
             logits = net(data)
             logits_list.append(logits)
             labels_list.append(label)
@@ -349,7 +355,10 @@ if __name__ == "__main__":
     scaled_model = ModelWithTemperature(net, args.log)
     scaled_model.set_temperature(val_logits, val_labels, cross_validate=cross_validation_error, device=device)
     T_opt = scaled_model.get_temperature()
-    logits, labels = get_logits_labels(test_loader, scaled_model, device=device)
+    # logits, labels = get_logits_labels(test_loader, scaled_model, device=device)
+    # save some inference time by directly scaling the test logits instead of doing a forward pass through the model again
+    logits = test_logits / T_opt
+    labels = test_labels
     conf_matrix, accuracy, _, _, _ = test_classification_net_logits(logits, labels)
 
     ece = ece_criterion(logits, labels).item()
@@ -371,7 +380,8 @@ if __name__ == "__main__":
     stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
                                           num_classes=num_classes, device=device,
                                           train_logits=train_logits,
-                                          train_labels=train_labels)
+                                          train_labels=train_labels,
+                                          links=args.links)
     # stats = round_floats(stats)
 
     def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
