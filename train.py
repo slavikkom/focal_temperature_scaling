@@ -319,15 +319,15 @@ if __name__ == "__main__":
         args.model_name + '_' +
         loss_function_save_name(
             args.loss_function,
-            args.gamma_schedule,
-            args.label_smoothing,
-            args.gamma,
-            args.gamma,
-            args.gamma2,
-            args.gamma3,
-            args.lamda,
-            args.beta,
-            args.seed
+            scheduled=args.gamma_schedule,
+            label_smoothing=args.label_smoothing,
+            gamma=args.gamma,
+            gamma1=args.gamma,
+            gamma2=args.gamma2,
+            gamma3=args.gamma3,
+            lamda=args.lamda,
+            beta=args.beta,
+            seed=args.seed
         )
     )
     if args.load:
@@ -339,8 +339,18 @@ if __name__ == "__main__":
         if args.saved_model_name == "resnet50_cross_entropy_350.model":
             # Define the pattern for the model name
             # TODO: NB! this model loading of the latest saved model found does not take care of the gamma schedule i.e. gamma_schedule=0
-            model_loss_str = args.model_name + '_' + \
-                             loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, args.gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed)
+            model_loss_str = args.model_name + '_' + loss_function_save_name(
+                args.loss_function,
+                scheduled=args.gamma_schedule,
+                label_smoothing=args.label_smoothing,
+                gamma=args.gamma,
+                gamma1=args.gamma,
+                gamma2=args.gamma2,
+                gamma3=args.gamma3,
+                lamda=args.lamda,
+                beta=args.beta,
+                seed=args.seed
+            )
             print("string to match: ", model_loss_str)
             model_pattern = re.compile(rf"{model_loss_str}.*_(\d+)\.model$")
             # Search for all model files in the save location
@@ -511,20 +521,46 @@ if __name__ == "__main__":
         if val_acc > best_val_acc and (epoch + 1) >= best_save_after_epoch:
             best_val_acc = val_acc
             print('New best error: %.4f' % (1 - best_val_acc))
-            save_name = args.save_loc + \
-                        args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
-                        '_best_' + \
-                        str(epoch + 1) + '.model'
+            save_name = os.path.join(
+                args.save_loc,
+                args.model_name + '_' +
+                loss_function_save_name(
+                    args.loss_function,
+                    scheduled=args.gamma_schedule,
+                    label_smoothing=args.label_smoothing,
+                    gamma=gamma,
+                    gamma1=args.gamma,
+                    gamma2=args.gamma2,
+                    gamma3=args.gamma3,
+                    lamda=args.lamda,
+                    beta=args.beta,
+                    seed=args.seed
+                ) +
+                '_best_' +
+                str(epoch + 1) + '.model'
+            )
             torch.save(net.state_dict(), save_name)
 
         if ((((epoch + 1) % args.save_interval == 0) and ((epoch + 1) >= periodic_save_after_epoch))
                 or args.smoke_test
                 or ((epoch + 1) == num_epochs)):
-            save_name = args.save_loc + \
-                        args.model_name + '_' + \
-                        loss_function_save_name(args.loss_function, args.label_smoothing, args.gamma_schedule, gamma, args.gamma, args.gamma2, args.gamma3, args.lamda, args.beta, args.seed) + \
-                        '_' + str(epoch + 1) + '.model'
+            save_name = os.path.join(
+                args.save_loc,
+                args.model_name + '_' +
+                loss_function_save_name(
+                    args.loss_function,
+                    scheduled=args.gamma_schedule,
+                    label_smoothing=args.label_smoothing,
+                    gamma=gamma,
+                    gamma1=args.gamma,
+                    gamma2=args.gamma2,
+                    gamma3=args.gamma3,
+                    lamda=args.lamda,
+                    beta=args.beta,
+                    seed=args.seed
+                ) +
+                '_' + str(epoch + 1) + '.model'
+            )
             torch.save(net.state_dict(), save_name)
 
 
