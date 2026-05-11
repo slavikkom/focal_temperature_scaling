@@ -6,14 +6,14 @@ import pandas as pd
 import os
 from results_parser import evaluation_metrics_to_dataframe
 
-# dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
-dataset_name = 'TINYIMAGENET' 
+dataset_name = 'CIFAR10' # 'CIFAR100', 'TINYIMAGENET' 
+# dataset_name = 'TINYIMAGENET' 
 # dataset_name = 'OCTMNIST' # 'TISSUEMNIST' # 'ORGANSMNIST' # 'OCTMNIST_LR05' # 'DERMAMNIST' # 'DERMAMNIST_B32' # 'DERMAMNIST_LR05' # 'PATHMNIST'  
 # dataset_name = 'DERMAMNIST_LR05'  
 FP_str = "_FP32"
 FP_str = "" # FP16
-# epoch = "350"
-epoch = "100"
+epoch = "350"
+# epoch = "100"
 random_seeds = [42, 123, 2023]
 # random_seeds = [42]
 # RESULTS_DIR = f'../RESULTS/hpc_results_july/{dataset_name}_epoch{epoch}{FP_str}'
@@ -41,7 +41,10 @@ else:
 
 loss_types = {
     "cross_entropy":    {"display_name": "CE",      "prefix": f"{model_name}_cross_entropy", "params": [1.0], "method_name": "Cross-Entropy",                   "link_name": "softmax"},
+    "label_smoothing":  {"display_name": "LS",      "prefix": "cross_entropy",               "params": [0.05, 0.1, 0.15], "method_name": "Label Smoothing $\\epsilon_{{tr}}={param}$", "link_name": "softmax", "base_link_value": 1.0, "match_link_value": False},
+    "brier_score":      {"display_name": "Brier",   "file_name": f"brier_score_{epoch}.json", "params": [1.0], "method_name": "Brier Score",                     "link_name": "softmax"},
     "focal_loss":       {"display_name": "Focal",   "prefix": "focal_loss_gamma",            "params": params, "method_name": "Focal  $\\gamma_{{tr}}={param}$", "link_name": "focal"},
+    "proper_focal_loss": {"display_name": "PFocal",  "prefix": "proper_focal_loss_gamma",     "params": params, "method_name": "Proper Focal $\\gamma_{{tr}}={param}$", "link_name": "focal", "base_link_name": "softmax", "base_link_value": 1.0, "best_eval_link_only": True, "match_link_name": False, "match_link_value": False, "allow_missing_all": True},
     "linear_loss":      {"display_name": "Linear",  "prefix": f"ti_linear_beta" if dataset_name == "TINYIMAGENET" else f"{model_name}_linear_beta",   "params": params, "method_name": "Linear $\\beta_{{tr}}={param}$",  "link_name": "focal_linear"},
     "exp_p_loss":       {"display_name": "Expp",    "prefix": "exp_p_alpha",                 "params": params, "method_name": "Exp    $\\alpha_{{tr}}={param}$", "link_name": "exp_p"}, 
     "exp_1mp_loss":     {"display_name": "Exp1mp",  "prefix": "exp_1mp_alpha",               "params": params, "method_name": "Exp1mp $\\alpha_{{tr}}={param}$", "link_name": "exp_1mp"}, 
@@ -76,16 +79,21 @@ method_names = []
 loss_types_params = []
 
 for loss_type, details in loss_types.items():
-    prefix = details["prefix"]
     params = details["params"]
     method_template = details.get("method_name")
+    explicit_file_name = details.get("file_name")
 
     for param in params:
-        if loss_type == "cross_entropy":
+        formatted_param = int(param) if param.is_integer() else param
+        if explicit_file_name is not None:
+            file_names.append(explicit_file_name)
+            method_names.append(method_template.format(param=formatted_param))
+        elif loss_type == "cross_entropy":
+            prefix = details["prefix"]
             file_names.append(f"{prefix}_{epoch}.json")
             method_names.append("Cross-Entropy")
         else:
-            formatted_param = int(param) if param.is_integer() else param
+            prefix = details["prefix"]
             file_names.append(f"{prefix}_{param}_{epoch}.json")
             method_names.append(method_template.format(param=formatted_param))
         loss_types_params.append((loss_type, param))
@@ -101,10 +109,12 @@ for loss_type, details in loss_types.items():
 # Initialize the DataFrame for the table
 df_paper = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'Logloss$_{T=1}$', 'ECE', 'ECE$_{T=1}$']) # for latex print out
 df_paper_tmp = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'ECE'])  # for choosing best performing method
+df_paper_tmp_excel = pd.DataFrame([], columns=['Approach', 'Accuracy', 'Logloss', 'ECE'])  # full results export
 
 # Number of link functions (used for inserting \hline)
 num_link_functions = len(link_functions)
 multi_index = []
+multi_index_excel = []
 
 
 for file_name, base_method, (loss_type, param) in zip(file_names, method_names, loss_types_params):
@@ -117,16 +127,28 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
     dfs = []
     data_raws = []
+    missing_file_paths = []
+    loss_details = loss_types[loss_type]
     for rns in random_seeds:
         # print(rns)
         file_path = os.path.join(RESULTS_DIR, f'{rns}', file_name)
         if not os.path.exists(file_path):
-            print(f"Warning: File '{file_path}' does not exist. Skipping...")
+            missing_file_paths.append(file_path)
             continue
         df_, data_ = get_df_from_file(file_path)
         dfs.append(df_)
         data_raws.append(data_)
         # print(df.shape)
+
+    if not dfs:
+        if not loss_details.get('allow_missing_all', False):
+            for file_path in missing_file_paths:
+                print(f"Warning: File '{file_path}' does not exist. Skipping...")
+            print(f"Warning: No files found for '{file_name}'. Skipping...")
+        continue
+
+    for file_path in missing_file_paths:
+        print(f"Warning: File '{file_path}' does not exist. Skipping...")
 
     # df = dfs[0]
     # data = data_raws[0]
@@ -202,8 +224,10 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     acc_b_tr_std_nots = df_slice_tr_nots.ACC_std.iloc[0]
     acc_b_te_std_nots =  df_slice_te_nots.ACC_std.iloc[0]
     # cross-entropy
-    base_link_name = loss_types[loss_type]['link_name']
-    query_str = f"link_name == '{base_link_name}' & link_value == {param}"
+    base_link_name = loss_types[loss_type].get('base_link_name', loss_types[loss_type]['link_name'])
+    base_link_value = loss_types[loss_type].get('base_link_value', param)
+    base_link_value = int(base_link_value) if base_link_value.is_integer() else base_link_value
+    query_str = f"link_name == '{base_link_name}' & link_value == {base_link_value}"
     val_b_best = df_slice_val.query(query_str)
     assert len(val_b_best) == 1 # the combination of base link and its value should be unique
     # print(val_b_best)
@@ -231,7 +255,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ce_b_te_std_nots = te_b_best_nots.Logloss_std#.values[0]
     # optimal temperature for CE based on validation set
     # ce_topt_b = data['T_dict']['softmax']['1'][' T_opt ce'] 
-    ce_topt_b = average_topt(data_raws, base_link_name, int(param) if param.is_integer() else param, 'ce')[0]
+    ce_topt_b = average_topt(data_raws, base_link_name, base_link_value, 'ce')[0]
     # expected calibration error (ECE)
     ece_b_tr = tr_b_best.ECE#.values[0]
     ece_b_val = val_b_best.ECE.values[0]
@@ -247,7 +271,7 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
     ece_b_te_std_nots = te_b_best_nots.ECE_std#.values[0]
     # optimal temperature for ECE based on validation set
     # ece_topt_b = data['T_dict'][base_link_name]['1'][' T_opt ece']
-    ece_topt_b = average_topt(data_raws, base_link_name, int(param) if param.is_integer() else param, 'ece')[0]
+    ece_topt_b = average_topt(data_raws, base_link_name, base_link_value, 'ece')[0]
 
     def format_string(train, train_std, test, test_std, topt=None, float_format='1.2f'):
         result_str = ''
@@ -301,11 +325,20 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
 
     df_paper = pd.concat([df_paper, pd.DataFrame([row_b])], ignore_index=True) # to show for latex
     df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_b_tmp])], ignore_index=True) # to choose best performing
-    multi_index.append((loss_types[loss_type]['display_name'], param, link_functions[base_link_name], param))
+    index_tuple = (loss_types[loss_type]['display_name'], param, link_functions[base_link_name], base_link_value)
+    multi_index.append(index_tuple)
+    df_paper_tmp_excel = pd.concat([df_paper_tmp_excel, pd.DataFrame([row_b_tmp])], ignore_index=True)
+    multi_index_excel.append(index_tuple)
     # multi_index.append((loss_types[loss_type]['display_name'], param, "N/A"))
     
     # Metrics for each link function
+    best_eval_link_only = loss_types[loss_type].get('best_eval_link_only', False)
+    best_eval_link_candidates = []
     for link_name, latex_name in link_functions.items():
+        eval_link_names = loss_types[loss_type].get('eval_link_names')
+        if eval_link_names is not None and link_name not in eval_link_names:
+            continue
+
         if link_name not in data_raws[0]['T_dict']:
             print("yo"*100)
             # TODO: the check has to be over all of the list?
@@ -465,9 +498,22 @@ for file_name, base_method, (loss_type, param) in zip(file_names, method_names, 
             'ECE_std': ece_te_std*100,
             'ECE$_{T=1}$': ece_te_nots*100,
         }
+        index_tuple = (loss_types[loss_type]['display_name'], param, link_functions[link_name], best_link_val)
+        df_paper_tmp_excel = pd.concat([df_paper_tmp_excel, pd.DataFrame([row_tmp])], ignore_index=True)
+        multi_index_excel.append(index_tuple)
+        if best_eval_link_only:
+            best_eval_metric = row_tmp['ECE_val'] if bestparam_based_on_ece else row_tmp['Logloss_val']
+            best_eval_link_candidates.append((best_eval_metric, row, row_tmp, index_tuple))
+        else:
+            df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
+            df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
+            multi_index.append(index_tuple)
+
+    if best_eval_link_only and best_eval_link_candidates:
+        _, row, row_tmp, index_tuple = min(best_eval_link_candidates, key=lambda x: x[0])
         df_paper = pd.concat([df_paper, pd.DataFrame([row])], ignore_index=True)
         df_paper_tmp = pd.concat([df_paper_tmp, pd.DataFrame([row_tmp])], ignore_index=True) # to choose best performing
-        multi_index.append((loss_types[loss_type]['display_name'], param, link_functions[link_name], best_link_val))
+        multi_index.append(index_tuple)
 
 # display(df_paper)
 
@@ -500,8 +546,10 @@ print(processed_latex_table)
 #%%
 
 multi_index = pd.MultiIndex.from_tuples(multi_index, names=['Loss', 'Param', 'Link', 'Value'])
+multi_index_excel = pd.MultiIndex.from_tuples(multi_index_excel, names=['Loss', 'Param', 'Link', 'Value'])
 df_paper.index = multi_index
 df_paper_tmp.index = multi_index
+df_paper_tmp_excel.index = multi_index_excel
 df_paper_tmp
 
 #%
@@ -518,9 +566,9 @@ def transfer_to_latex(df, sparsify=True):
     return latex_table
 
 
-show_overfitting_logloss = False # if True, append a trainability-table column with test-val / test-tr for Logloss
-show_overfitting_ece = False # if True, append a trainability-table column with test-val / test-tr for ECE
-show_overfitting_accuracy = False # if True, append a trainability-table column with test-val / test-tr for Accuracy
+show_overfitting_logloss = True # if True, append a trainability-table column with test-val / test-tr for Logloss
+show_overfitting_ece = True # if True, append a trainability-table column with test-val / test-tr for ECE
+show_overfitting_accuracy = True # if True, append a trainability-table column with test-val / test-tr for Accuracy
 
 def format_overfitting_string(test, val, train, float_format='2.2f'):
     return f'{test - val:{float_format}}/{test - train:{float_format}}'
@@ -585,7 +633,7 @@ for criteria in ['Accuracy_val', 'Logloss_val', 'ECE_val']:
     # display(trainability_df)
     print(transfer_to_latex(trainability_df))
 
-df_paper_tmp.round(3).to_excel(f"{dataset_name}_results.xlsx")
+df_paper_tmp_excel.round(3).to_excel(f"{dataset_name}_results.xlsx")
 
 
 #%%
@@ -602,6 +650,10 @@ use_paired_loss_link_value = True # if True, also require loss param and link va
 # Create a mapping from display_name to link_name for paired matching
 display_name_to_link = {
     loss_types[loss_type]['display_name']: loss_types[loss_type]['link_name']
+    for loss_type in loss_types.keys()
+}
+display_name_to_details = {
+    loss_types[loss_type]['display_name']: loss_types[loss_type]
     for loss_type in loss_types.keys()
 }
 
@@ -622,10 +674,12 @@ for metric in ['ECE_val', 'Logloss_val']:
             
             # Check if this loss and link correspond
             expected_link = link_functions[display_name_to_link[loss_name]]
-            link_matches = (link_name == expected_link)
+            should_match_link_name = display_name_to_details[loss_name].get('match_link_name', True)
+            link_matches = True if not should_match_link_name else (link_name == expected_link)
 
             value_matches = True
-            if use_paired_loss_link_value:
+            should_match_link_value = display_name_to_details[loss_name].get('match_link_value', True)
+            if use_paired_loss_link_value and should_match_link_value:
                 try:
                     value_matches = np.isclose(float(loss_param), float(link_value))
                 except (TypeError, ValueError):
@@ -641,13 +695,18 @@ for metric in ['ECE_val', 'Logloss_val']:
                 (df_to_filter.index.get_level_values('Loss') == 'CE')
                 & (df_to_filter.index.get_level_values('Link') == 'Softmax')
             )
+            & ~(
+                (df_to_filter.index.get_level_values('Loss') == 'PFocal')
+                & (df_to_filter.index.get_level_values('Link') == 'Softmax')
+            )
         ]
     
+    finite_logloss = np.isfinite(pd.to_numeric(df_to_filter['Logloss'], errors='coerce'))
     topN_idx = (
         # ensure that the link value is finite in addition to looking at min_aceptable_ECE
         df_to_filter[(df_to_filter[metric] >= min_acceptable_ECE) & \
                      (df_to_filter[metric] >= 1.2*df_to_filter[metric+'_std']) & \
-                        np.isfinite(df_to_filter['Logloss'])]
+                        finite_logloss]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
@@ -665,7 +724,7 @@ for metric in ['ECE_val', 'Logloss_val']:
 
     if N == 1: # preserve same order of losses as the trainability table
         index_level0_trainability_df = df_paper_tmp.index.get_level_values('Loss').unique() 
-        calibration_df = calibration_df.loc[index_level0_trainability_df] 
+        calibration_df = calibration_df.reindex(index_level0_trainability_df, level='Loss') 
 
     # Baselines: CE with softmax link as baseline 1
     baseline1_idx = \
@@ -675,13 +734,14 @@ for metric in ['ECE_val', 'Logloss_val']:
         ].index
     
     # Focal with softmax link as baseline 2
+    finite_logloss_baseline2 = np.isfinite(pd.to_numeric(df_paper_tmp['Logloss'], errors='coerce'))
     top1_baseline2_idx = (
         df_paper_tmp[
                         (df_paper_tmp.index.get_level_values('Loss') == 'Focal') & \
                         (df_paper_tmp.index.get_level_values('Link') == 'Softmax') & \
                         (df_paper_tmp[metric] >= min_acceptable_ECE) & \
                         (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
-                        np.isfinite(df_paper_tmp['Logloss'])]
+                        finite_logloss_baseline2]
         .groupby(level='Loss')
         .apply(lambda x: x[metric].nsmallest(N).index)
         .explode()
@@ -695,7 +755,23 @@ for metric in ['ECE_val', 'Logloss_val']:
     baseline2_tmp = df_paper_tmp.loc[top1_baseline2_idx]
     baseline2 = append_overfitting_columns(baseline2, baseline2_tmp)
 
-    calibration_df_withbaselines = pd.concat([baseline1, baseline2, calibration_df], axis=0)
+    finite_logloss_pfocal = np.isfinite(pd.to_numeric(df_paper_tmp['Logloss'], errors='coerce'))
+    top1_pfocal_softmax_idx = (
+        df_paper_tmp[
+                        (df_paper_tmp.index.get_level_values('Loss') == 'PFocal') & \
+                        (df_paper_tmp.index.get_level_values('Link') == 'Softmax') & \
+                        (df_paper_tmp[metric] >= min_acceptable_ECE) & \
+                        (df_paper_tmp[metric] >= 1.2*df_paper_tmp[metric+'_std']) & \
+                        finite_logloss_pfocal]
+        .groupby(level='Loss')
+        .apply(lambda x: x[metric].nsmallest(N).index)
+        .explode()
+    )
+    baseline_pfocal = df_paper.loc[top1_pfocal_softmax_idx].drop(columns=['Approach'])
+    baseline_pfocal_tmp = df_paper_tmp.loc[top1_pfocal_softmax_idx]
+    baseline_pfocal = append_overfitting_columns(baseline_pfocal, baseline_pfocal_tmp)
+
+    calibration_df_withbaselines = pd.concat([baseline1, baseline2, baseline_pfocal, calibration_df], axis=0)
 
     if with_calibration_baselines:
         print(
@@ -768,8 +844,8 @@ for (link, value), group in df_paper_tmp.groupby(level=['Link', 'Value']):
     link_comparison[(link, value)] = {
         'Fraction_Baseline1': fraction_baseline1.round(2),
         'Fraction_Baseline2': fraction_baseline2.round(2),
-        'Relative_to_Baseline1': relative_to_baseline1[0].round(2),
-        'Relative_to_Baseline2': relative_to_baseline2[0].round(2),
+        'Relative_to_Baseline1': round(float(relative_to_baseline1), 2),
+        'Relative_to_Baseline2': round(float(relative_to_baseline2), 2),
         'Relative_Change_Improved_Baseline1': round(float(relative_change_improved_baseline1), 2),
         'Relative_Change_Improved_Baseline2': round(float(relative_change_improved_baseline2), 2)
     }
