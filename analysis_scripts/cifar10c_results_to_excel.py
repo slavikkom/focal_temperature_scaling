@@ -85,6 +85,15 @@ APPROACH_PATTERNS = (
         "sort": 1,
     },
     {
+        "loss": "proper_focal_loss",
+        "display": "Proper Focal gamma={param:g}",
+        "regex": re.compile(r"^proper_focal_loss_gamma_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"),
+        "clean_file": "proper_focal_loss_gamma_{param}_{epoch}.json",
+        "metric_link_name": "softmax",
+        "metric_link_value": 1.0,
+        "sort": 1.1,
+    },
+    {
         "loss": "linear_loss",
         "display": "Linear beta={param:g}",
         "regex": re.compile(r"^resnet50_linear_beta_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"),
@@ -141,6 +150,9 @@ METRICS = (
     ("Brier", "Brier", 1.0, "0.4f"),
 )
 AGGREGATED_FIELDS = (*METRICS, ("Temperature", "Temperature", 1.0, "0.2f"))
+_CORRUPTION_INDEX_CACHE = {}
+_SUMMARY_METRIC_INDEX_CACHE = {}
+_SUMMARY_TEMPERATURE_INDEX_CACHE = {}
 
 
 def parse_args() -> argparse.Namespace:
@@ -201,6 +213,19 @@ def parse_args() -> argparse.Namespace:
         choices=("ce", "ece"),
         default="ce",
         help="Temperature selection criterion for calibrated metrics. Default: ce",
+    )
+    parser.add_argument(
+        "--skip-detail-sheets",
+        action="store_true",
+        help="Skip Raw Results, Aggregated Numeric, and Selected Rows sheets for faster export.",
+    )
+    parser.add_argument(
+        "--separate-std-columns",
+        action="store_true",
+        help=(
+            "Write mean and std into separate numeric columns in the Summary and "
+            "corruption sheets instead of single 'mean +/- std' text cells."
+        ),
     )
     return parser.parse_args()
 
@@ -352,6 +377,7 @@ def collect_records(
 ) -> tuple[pd.DataFrame, list[str]]:
     records = []
     warnings = []
+    json_cache = {}
 
     for approach in approaches:
         for corruption in corruptions:
@@ -370,12 +396,16 @@ def collect_records(
                         warnings.append(f"Missing file: {path}")
                         continue
 
-                    try:
-                        with path.open("r", encoding="utf-8") as file:
-                            data = json.load(file)
-                    except Exception as exc:
-                        warnings.append(f"Could not read {path}: {exc}")
-                        continue
+                    if path in json_cache:
+                        data = json_cache[path]
+                    else:
+                        try:
+                            with path.open("r", encoding="utf-8") as file:
+                                data = json.load(file)
+                            json_cache[path] = data
+                        except Exception as exc:
+                            warnings.append(f"Could not read {path}: {exc}")
+                            continue
 
                     for calibration in calibrations:
                         try:
@@ -585,6 +615,32 @@ def format_summary_metric_from_row(row: pd.Series, fmt: str) -> str:
     return format_cell(row["mean"], row["std"], int(row["count"]), fmt)
 
 
+def export_std(std: float, count: int):
+    if count <= 1 or pd.isna(std):
+        return ""
+    return std
+
+
+def metric_values_from_row(row: pd.Series | None, metric_name: str) -> tuple[float | str, float | str]:
+    if row is None:
+        return "", ""
+    count = int(row[f"{metric_name}_count"])
+    mean = row[f"{metric_name}_mean"]
+    if pd.isna(mean):
+        return "", ""
+    return mean, export_std(row[f"{metric_name}_std"], count)
+
+
+def summary_metric_values_from_row(row: pd.Series | None) -> tuple[float | str, float | str]:
+    if row is None:
+        return "", ""
+    count = int(row["count"])
+    mean = row["mean"]
+    if pd.isna(mean):
+        return "", ""
+    return mean, export_std(row["std"], count)
+
+
 def format_temperature_from_agg(rows: pd.DataFrame) -> str:
     if rows.empty or "Temperature_mean" not in rows.columns:
         return ""
@@ -652,27 +708,97 @@ def format_summary_split_value(
     return format_summary_metric_from_row(split_rows.iloc[0], fmt)
 
 
-def format_overall_from_agg(
-    rows: pd.DataFrame,
+def first_table_severity(severities: list[int]) -> int:
+    return sorted(severities)[0]
+
+
+def index_lookup(indexed_df: pd.DataFrame, key: tuple):
+    try:
+        row = indexed_df.loc[key]
+    except KeyError:
+        return None
+    if isinstance(row, pd.DataFrame):
+        return row.iloc[0]
+    return row
+
+
+def format_overall_from_rows(
+    rows: list[pd.Series],
     metric_name: str,
     fmt: str,
-    severities: list[int],
 ) -> str:
-    test_rows = rows[
-        (rows["split"] == "test")
-        & (rows["severity"].isin(severities))
-        & (rows[f"{metric_name}_mean"].notna())
+    values = [
+        row[f"{metric_name}_mean"]
+        for row in rows
+        if row is not None and pd.notna(row[f"{metric_name}_mean"])
     ]
-    if test_rows.empty:
+    if not values:
         return ""
 
-    values = test_rows[f"{metric_name}_mean"].dropna()
+    values = pd.Series(values)
     return format_cell(
         values.mean(),
         values.std(ddof=1) if len(values) > 1 else np.nan,
         int(len(values)),
         fmt,
     )
+
+
+def overall_values_from_rows(
+    rows: list[pd.Series],
+    metric_name: str,
+) -> tuple[float | str, float | str]:
+    values = [
+        row[f"{metric_name}_mean"]
+        for row in rows
+        if row is not None and pd.notna(row[f"{metric_name}_mean"])
+    ]
+    if not values:
+        return "", ""
+
+    values = pd.Series(values)
+    std = values.std(ddof=1) if len(values) > 1 else np.nan
+    return values.mean(), export_std(std, len(values))
+
+
+def set_mean_std_columns(
+    row: dict,
+    column_name: str,
+    mean: float | str,
+    std: float | str,
+) -> None:
+    row[f"{column_name} Mean"] = mean
+    row[f"{column_name} Std"] = std
+
+
+def corruption_index(agg_df: pd.DataFrame, corruption: str) -> pd.DataFrame:
+    key = (id(agg_df), corruption)
+    if key not in _CORRUPTION_INDEX_CACHE:
+        subset = agg_df[agg_df["corruption"] == corruption]
+        _CORRUPTION_INDEX_CACHE[key] = subset.set_index(
+            ["approach_calibration", "split", "severity"], drop=False
+        )
+    return _CORRUPTION_INDEX_CACHE[key]
+
+
+def summary_metric_index(summary_df: pd.DataFrame, metric_name: str) -> pd.DataFrame:
+    key = (id(summary_df), metric_name)
+    if key not in _SUMMARY_METRIC_INDEX_CACHE:
+        metric_summary = summary_df[summary_df["metric"] == metric_name]
+        _SUMMARY_METRIC_INDEX_CACHE[key] = metric_summary.set_index(
+            ["approach_calibration", "split", "severity"], drop=False
+        )
+    return _SUMMARY_METRIC_INDEX_CACHE[key]
+
+
+def summary_temperature_index(summary_df: pd.DataFrame) -> pd.DataFrame:
+    key = id(summary_df)
+    if key not in _SUMMARY_TEMPERATURE_INDEX_CACHE:
+        temp_summary = summary_df[summary_df["metric"] == "Temperature"]
+        _SUMMARY_TEMPERATURE_INDEX_CACHE[key] = temp_summary.set_index(
+            ["approach_calibration", "split", "severity"], drop=False
+        )
+    return _SUMMARY_TEMPERATURE_INDEX_CACHE[key]
 
 
 def metric_table_for_corruption(
@@ -683,34 +809,75 @@ def metric_table_for_corruption(
     severities: list[int],
     splits: list[str],
     corruption: str,
+    separate_std_columns: bool = False,
 ) -> pd.DataFrame:
     rows = []
-    subset = agg_df[agg_df["corruption"] == corruption]
+    indexed = corruption_index(agg_df, corruption)
+    first_severity = first_table_severity(severities)
+
     for approach in approaches:
-        approach_subset = subset[subset["approach_calibration"] == approach]
+        temp_row = index_lookup(indexed, (approach, "test", first_severity))
+        train_row = index_lookup(indexed, (approach, "train", first_severity))
+        val_row = index_lookup(indexed, (approach, "val", first_severity))
         row = {
             "Approach": approach_with_temperature(
-                approach, format_temperature_from_agg(approach_subset)
+                approach,
+                format_metric_from_row(temp_row, "Temperature", "0.2f")
+                if temp_row is not None
+                else "",
             ),
-            "Train": format_split_value(approach_subset, metric_name, fmt, "train"),
-            "Validation": format_split_value(approach_subset, metric_name, fmt, "val"),
         }
+        if separate_std_columns:
+            set_mean_std_columns(row, "Train", *metric_values_from_row(train_row, metric_name))
+            set_mean_std_columns(
+                row, "Validation", *metric_values_from_row(val_row, metric_name)
+            )
+        else:
+            row["Train"] = (
+                format_metric_from_row(train_row, metric_name, fmt)
+                if train_row is not None
+                else ""
+            )
+            row["Validation"] = (
+                format_metric_from_row(val_row, metric_name, fmt)
+                if val_row is not None
+                else ""
+            )
+
         for severity in severities:
-            cell = approach_subset[
-                (approach_subset["split"] == "test")
-                & (approach_subset["severity"] == severity)
-            ]
-            if cell.empty:
-                row[f"Severity {severity}"] = ""
-                continue
-            row[f"Severity {severity}"] = format_metric_from_row(cell.iloc[0], metric_name, fmt)
+            test_row = index_lookup(indexed, (approach, "test", severity))
+            column_name = f"Severity {severity}"
+            if separate_std_columns:
+                set_mean_std_columns(
+                    row, column_name, *metric_values_from_row(test_row, metric_name)
+                )
+            else:
+                if test_row is None:
+                    row[column_name] = ""
+                    continue
+                row[column_name] = format_metric_from_row(test_row, metric_name, fmt)
+
         corrupted_severities = [severity for severity in severities if severity != 0]
-        row["Overall Corrupted"] = format_overall_from_agg(
-            approach_subset, metric_name, fmt, corrupted_severities
-        )
-        row["Overall"] = format_overall_from_agg(
-            approach_subset, metric_name, fmt, severities
-        )
+        corrupted_rows = [
+            index_lookup(indexed, (approach, "test", severity))
+            for severity in corrupted_severities
+        ]
+        overall_rows = [
+            index_lookup(indexed, (approach, "test", severity))
+            for severity in severities
+        ]
+        if separate_std_columns:
+            set_mean_std_columns(
+                row,
+                "Overall Corrupted",
+                *overall_values_from_rows(corrupted_rows, metric_name),
+            )
+            set_mean_std_columns(
+                row, "Overall", *overall_values_from_rows(overall_rows, metric_name)
+            )
+        else:
+            row["Overall Corrupted"] = format_overall_from_rows(corrupted_rows, metric_name, fmt)
+            row["Overall"] = format_overall_from_rows(overall_rows, metric_name, fmt)
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -722,37 +889,55 @@ def metric_table_for_summary(
     approaches: list[str],
     severities: list[int],
     splits: list[str],
+    separate_std_columns: bool = False,
 ) -> pd.DataFrame:
     rows = []
-    metric_summary = summary_df[summary_df["metric"] == metric_name]
+    metric_index = summary_metric_index(summary_df, metric_name)
+    temp_index = summary_temperature_index(summary_df)
     columns = [*severities, "Overall Corrupted", "Overall"]
+    first_severity = first_table_severity(severities)
+
     for approach in approaches:
-        approach_all_summary = summary_df[summary_df["approach_calibration"] == approach]
-        approach_summary = metric_summary[metric_summary["approach_calibration"] == approach]
+        temp_row = index_lookup(temp_index, (approach, "test", first_severity))
+        train_row = index_lookup(metric_index, (approach, "train", first_severity))
+        val_row = index_lookup(metric_index, (approach, "val", first_severity))
         row = {
             "Approach": approach_with_temperature(
-                approach, format_temperature_from_summary(approach_all_summary)
-            ),
-            "Train": format_summary_split_value(
-                approach_all_summary, metric_name, fmt, "train"
-            ),
-            "Validation": format_summary_split_value(
-                approach_all_summary, metric_name, fmt, "val"
+                approach,
+                format_summary_metric_from_row(temp_row, "0.2f")
+                if temp_row is not None
+                else "",
             ),
         }
-        for severity in columns:
-            cell = approach_summary[
-                (approach_summary["split"] == "test")
-                & (approach_summary["severity"] == severity)
-            ]
-            column_name = f"Severity {severity}" if isinstance(severity, int) else severity
-            if cell.empty:
-                row[column_name] = ""
-                continue
-            item = cell.iloc[0]
-            row[column_name] = format_cell(
-                item["mean"], item["std"], int(item["count"]), fmt
+        if separate_std_columns:
+            set_mean_std_columns(row, "Train", *summary_metric_values_from_row(train_row))
+            set_mean_std_columns(
+                row, "Validation", *summary_metric_values_from_row(val_row)
             )
+        else:
+            row["Train"] = (
+                format_summary_metric_from_row(train_row, fmt)
+                if train_row is not None
+                else ""
+            )
+            row["Validation"] = (
+                format_summary_metric_from_row(val_row, fmt)
+                if val_row is not None
+                else ""
+            )
+
+        for severity in columns:
+            column_name = f"Severity {severity}" if isinstance(severity, int) else severity
+            item = index_lookup(metric_index, (approach, "test", severity))
+            if separate_std_columns:
+                set_mean_std_columns(row, column_name, *summary_metric_values_from_row(item))
+            else:
+                if item is None:
+                    row[column_name] = ""
+                    continue
+                row[column_name] = format_cell(
+                    item["mean"], item["std"], int(item["count"]), fmt
+                )
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -792,13 +977,11 @@ def write_metric_blocks(
         worksheet.write(row, 0, metric_name, metric_format)
         row += 1
 
-        for col_idx, column in enumerate(table.columns):
-            worksheet.write(row, col_idx, column, header_format)
+        worksheet.write_row(row, 0, list(table.columns), header_format)
         row += 1
 
         for _, values in table.iterrows():
-            for col_idx, value in enumerate(values):
-                worksheet.write(row, col_idx, value, cell_format)
+            worksheet.write_row(row, 0, list(values), cell_format)
             worksheet.set_row(row, 36)
             row += 1
         row += 2
@@ -845,7 +1028,13 @@ def write_workbook(
             (
                 metric_name,
                 metric_table_for_summary(
-                    summary_df, metric_name, fmt, approach_order, severities, args.splits
+                    summary_df,
+                    metric_name,
+                    fmt,
+                    approach_order,
+                    severities,
+                    args.splits,
+                    args.separate_std_columns,
                 ),
             )
             for metric_name, _, _, fmt in METRICS
@@ -870,6 +1059,7 @@ def write_workbook(
                         severities,
                         args.splits,
                         corruption,
+                        args.separate_std_columns,
                     ),
                 )
                 for metric_name, _, _, fmt in METRICS
@@ -882,9 +1072,10 @@ def write_workbook(
                 corruption_note,
             )
 
-        agg_df.to_excel(writer, sheet_name="Aggregated Numeric", index=False)
-        raw_df.to_excel(writer, sheet_name="Raw Results", index=False)
-        selected_df.to_excel(writer, sheet_name="Selected Rows", index=False)
+        if not args.skip_detail_sheets:
+            agg_df.to_excel(writer, sheet_name="Aggregated Numeric", index=False)
+            raw_df.to_excel(writer, sheet_name="Raw Results", index=False)
+            selected_df.to_excel(writer, sheet_name="Selected Rows", index=False)
 
         if warnings:
             pd.DataFrame({"warning": warnings}).to_excel(
@@ -913,10 +1104,32 @@ def main() -> None:
     if not approaches:
         raise RuntimeError(f"No known CIFAR-10-C result JSON files found in {results_dir}")
 
-    raw_df, warnings = collect_records(
+    selection_severity = next((severity for severity in severities if severity != 0), severities[0])
+    selection_severities = [selection_severity]
+    selection_raw_df, selection_warnings = collect_records(
         results_dir=results_dir,
         clean_results_dir=clean_results_dir,
         approaches=approaches,
+        corruptions=[corruptions[0]],
+        severities=selection_severities,
+        seeds=seeds,
+        splits=["val"],
+        calibrations=args.calibrations,
+        cal_criteria=args.cal_criteria,
+    )
+    if selection_raw_df.empty:
+        raise RuntimeError("No readable validation records were found for parameter selection.")
+
+    _, selected_df = select_best_validation_logloss(selection_raw_df)
+    selected_approach_names = set(selected_df["approach"])
+    selected_approaches = [
+        approach for approach in approaches if approach.approach in selected_approach_names
+    ]
+
+    raw_df, final_warnings = collect_records(
+        results_dir=results_dir,
+        clean_results_dir=clean_results_dir,
+        approaches=selected_approaches,
         corruptions=corruptions,
         severities=severities,
         seeds=seeds,
@@ -924,10 +1137,12 @@ def main() -> None:
         calibrations=args.calibrations,
         cal_criteria=args.cal_criteria,
     )
-    if raw_df.empty:
-        raise RuntimeError("No readable result records were found.")
-
-    raw_df, selected_df = select_best_validation_logloss(raw_df)
+    raw_df = raw_df.merge(
+        selected_df[["approach", "calibration"]],
+        on=["approach", "calibration"],
+        how="inner",
+    )
+    warnings = selection_warnings + final_warnings
     if raw_df.empty:
         raise RuntimeError("No result records remained after validation-Logloss selection.")
 
