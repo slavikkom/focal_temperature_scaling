@@ -39,7 +39,7 @@ mkdir -p "$EVAL_BASE"
 
 # List of model patterns (comment out to exclude any)
 MODELS=(
-  # "resnet50_ti_cross_entropy"
+  "resnet50_ti_cross_entropy"
   "resnet50_ti_brier_score"
   "resnet50_ti_exp_1mp"
   "resnet50_ti_exp_p"
