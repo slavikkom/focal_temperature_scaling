@@ -43,8 +43,8 @@ SEED_IDX=$((SLURM_ARRAY_TASK_ID % NUM_SEEDS))
 ARGS=${CONFIGS[$CONFIG_ID]}
 SEED=${SEEDS[$SEED_IDX]}
 # SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST/${SEED}/"
-# SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST_LR05/${SEED}/"
-SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST_B32/${SEED}/"
+SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST_LR05/${SEED}/"
+# SAVE_PATH="../MODEL_DIRECTORY/DERMAMNIST_B32/${SEED}/"
 SMOKE_ARG=""  # Change to "--smoke-test" if needed
 AMP_ARG="--amp"
 
@@ -59,7 +59,7 @@ if [ "$TRAIN_MODE" == "scratch" ]; then
         --model resnet18 \
         $ARGS \
         --decay 0.0005 \
-        -b 32 \
+        --lr 0.05 \
         -g $AMP_ARG \
         --save-path $SAVE_PATH \
         $SMOKE_ARG \
@@ -71,6 +71,7 @@ elif [ "$TRAIN_MODE" == "continue" ]; then
         --model resnet18 \
         $ARGS \
         --decay 0.0005 \
+        --lr 0.05 \
         -g $AMP_ARG \
         --save-path $SAVE_PATH \
         $SMOKE_ARG \
