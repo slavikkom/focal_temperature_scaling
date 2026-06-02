@@ -7,6 +7,12 @@ The paper introduces focal temperature scaling - a novel approach for calibratin
 
 Most of the code for training, evaluation and calibration of the baseline methods were borrowed from repositories https://github.com/3mcloud/adafocal and https://github.com/torrvision/focal_calibration .
 
+The Dirichlet calibration implementation in `Calibs/fulldirichlet.py`,
+`Calibs/diagdirichlet.py`, and `Calibs/multinomial.py` is adapted from
+https://github.com/dirichletcal/dirichlet_python . The main adaptation is that
+the optimization/autodiff backend was changed from JAX to PyTorch while keeping
+the sklearn-style wrappers.
+
 
 # Setup
 
@@ -36,4 +42,3 @@ The folder evaluate_scripts contains examples of the code to run different evalu
 # Citation:
 
 If you find the code or paper beneficial for your research, please cite it as follows:
-

@@ -3,6 +3,11 @@
 This directory contains several Dirichlet-style calibration options. They are
 not all equivalent; the main implementation for paper-faithful Dirichlet
 calibration is `FullDirichletCalibrator`.
+The Dirichlet calibration implementation in `Calibs/fulldirichlet.py`,
+`Calibs/diagdirichlet.py`, and `Calibs/multinomial.py` is adapted from
+https://github.com/dirichletcal/dirichlet_python . The main adaptation is that
+the optimization/autodiff backend was changed from JAX to PyTorch while keeping
+the sklearn-style wrappers.
 
 ## Recommended Configurations
 
@@ -20,7 +25,7 @@ calibration is `FullDirichletCalibrator`.
 ```python
 from Calibs.fulldirichlet import FullDirichletCalibrator
 from Calibs.diagdirichlet import DiagonalDirichletCalibrator
-from Calibs.beta_dirichlet import BetaDirichletCalibrator
+from Calibs.betadirichlet import BetaDirichletCalibrator
 from Calibs.multinomial import MultinomialRegression
 
 
@@ -89,6 +94,38 @@ removes softmax redundancy and improves identifiability.
 The default is `initializer="identity"`, which starts optimization near the
 identity calibration map. This is usually the safest default.
 
+## Near One-Hot Probabilities
+
+All of these calibrators have limited ability to change predictions that are
+already exact or nearly exact one-hot probability vectors, such as:
+
+```text
+[1.0, 0.0, 0.0]
+```
+
+The Dirichlet-style methods operate on `log(p)`, so probabilities are clipped
+before taking logs. A one-hot vector becomes approximately:
+
+```text
+[1 - eps, eps, eps]
+```
+
+and therefore:
+
+```text
+log(1 - eps) ~= 0
+log(eps)     << 0
+```
+
+This creates extremely large score gaps. In practice, full, diagonal, ODIR,
+fixed diagonal, and beta-style calibration usually leave these predictions
+nearly one-hot after calibration.
+
+This is expected behavior, not necessarily a bug. Once probabilities have been
+hardened to zeros and ones, most uncertainty information has already been lost.
+For calibration experiments, prefer saving and calibrating from raw logits or
+non-hardened softmax probabilities.
+
 ## Practical Experiment Set
 
 For most experiments, start with:
@@ -104,6 +141,6 @@ FullDirichletCalibrator(reg_lambda=reg, reg_mu=reg)
 DiagonalDirichletCalibrator(reg_lambda=reg, reg_mu=None)
 ```
 
-Treat `BetaDirichletCalibrator` from `beta_dirichlet.py` as a separate custom
+Treat `BetaDirichletCalibrator` from `betadirichlet.py` as a separate custom
 baseline, not as the main full Dirichlet implementation. `DirichletCalibrator`
 from `dirichlet.py` remains as a backward-compatible alias.

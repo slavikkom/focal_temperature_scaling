@@ -1,3 +1,11 @@
+"""
+Diagonal Dirichlet calibration.
+
+Adapted from https://github.com/dirichletcal/dirichlet_python .
+The main local adaptation is using PyTorch instead of JAX for the optimization
+backend in `multinomial.py`.
+"""
+
 from sklearn.metrics import log_loss
 
 try:

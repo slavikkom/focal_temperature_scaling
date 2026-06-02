@@ -1,5 +1,13 @@
 from __future__ import division
 
+"""
+Multinomial regression core for Dirichlet calibration.
+
+Adapted from https://github.com/dirichletcal/dirichlet_python .
+The main local adaptation is replacing the original JAX autodiff/optimization
+path with a PyTorch `torch.optim.LBFGS` implementation.
+"""
+
 import logging
 
 import numpy as np
