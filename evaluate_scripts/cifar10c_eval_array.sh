@@ -29,7 +29,9 @@ SEED_DIRS=(42 123 2023)
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+# GAMMAS=(2.0 3.0 5.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 CORRUPTIONS=(
   "brightness"
@@ -67,6 +69,8 @@ mkdir -p "$EVAL_BASE"
 
 # List of model patterns (comment out to exclude any)
 MODELS=(
+  "resnet50_brier_score"
+  "resnet50_proper_focal_loss"
   "resnet50_cross_entropy"
   "resnet50_exp_1mp"
   "resnet50_exp_p"
@@ -83,9 +87,16 @@ COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
   for model in "${MODELS[@]}"; do
     case $model in
-      "resnet50_cross_entropy")
+      "resnet50_brier_score")
         # No parameters required
         COMBINATIONS+=("$seed_idx|$model|none|none")
+        ;;
+      "resnet50_cross_entropy")
+        # No parameters required
+        # COMBINATIONS+=("$seed_idx|$model|none|none")
+        for smoothing in "${LABEL_SMOOTHING_VALUES[@]}"; do
+          COMBINATIONS+=("$seed_idx|${model}_${smoothing}|none|none")
+        done
         ;;
       "resnet50_exp_1mp"|"resnet50_exp_p")
         # Single alpha parameter
@@ -93,7 +104,7 @@ for seed_idx in "${SEED_DIRS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|alpha_$alpha|none")
         done
         ;;
-      "resnet50_focal_loss_adaptive"|"resnet50_focal_loss")
+      "resnet50_focal_loss_adaptive"|"resnet50_focal_loss"|"resnet50_proper_focal_loss")
         # Single gamma parameter
         for gamma in "${GAMMAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|gamma_$gamma|none")
@@ -130,7 +141,7 @@ TOTAL_JOBS=${#COMBINATIONS[@]}
 if [ "$DEBUG" = true ]; then
   echo "Total jobs: $TOTAL_JOBS"
   if [ -z "$SLURM_ARRAY_TASK_ID" ]; then
-    SLURM_ARRAY_TASK_ID=100
+    SLURM_ARRAY_TASK_ID=0
   fi
 fi
 
@@ -167,6 +178,11 @@ MODEL_FILE="${MODEL_NAME}_${EPOCH}.model"
 echo "Saved Models Path: $SAVE_PATH"
 echo "Model Filename: $MODEL_FILE"
 echo "Evaluating: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
+if [ "$DEBUG" = true ]; then
+  printf '%s\n' "${COMBINATIONS[@]}"
+fi
+
+# exit 0
 
 # Run evaluation
 for corruption in "${CORRUPTIONS[@]}"; do
@@ -190,6 +206,7 @@ for corruption in "${CORRUPTIONS[@]}"; do
         --save-path "$SAVE_PATH" \
         --save-eval-path "$SAVE_EVAL_PATH" \
         --saved_model_name "$MODEL_FILE" \
+        --links softmax \
         --seed "$SEED_IDX" \
         >> "${SAVE_EVAL_PATH}/${MODEL_NAME}.txt"
     fi
