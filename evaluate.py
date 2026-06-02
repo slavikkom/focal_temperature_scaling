@@ -396,7 +396,12 @@ if __name__ == "__main__":
     if not os.path.exists(args.save_eval_loc):
         os.makedirs(args.save_eval_loc)
 
-    saved_stats_name = "_".join(saved_model_name.split(".m")[0].split("_")[-5:])
+    model_stem = os.path.splitext(saved_model_name)[0]
+    model_prefix = args.model_name + "_"
+    if model_stem.startswith(model_prefix):
+        saved_stats_name = model_stem[len(model_prefix):]
+    else:
+        saved_stats_name = model_stem
     save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
     with open(save_stats_path + ".json", 'w') as f:
         json.dump(stats, f)
