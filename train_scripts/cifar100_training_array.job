@@ -2,6 +2,7 @@
 #SBATCH --job-name=cf100
 #SBATCH --output=slurm_logs_cifar100/job_%A_%a.out
 #SBATCH --partition=gpu
+#SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --time=08:00:00
