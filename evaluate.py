@@ -127,6 +127,12 @@ def parseArgs():
                         help="Calibration links to evaluate. Choices: all, {}. Omit to evaluate all links.".format(
                             ", ".join(link_dict.keys())
                         ))
+    parser.add_argument("--dirichlet", action="store_true", dest="dirichlet",
+                        help="Evaluate full ODIR Dirichlet calibration on softmax probabilities")
+    parser.set_defaults(dirichlet=False)
+    parser.add_argument("--dirichlet-cv-folds", type=int, default=3,
+                        dest="dirichlet_cv_folds",
+                        help="Number of validation-folds for Dirichlet GridSearchCV")
     parser.add_argument("--corruption", type=str, default="gaussian_noise",
                         dest="corruption",
                         help="CIFAR-10-C corruption to evaluate, or 'all'")
@@ -382,6 +388,14 @@ if __name__ == "__main__":
                                           train_logits=train_logits,
                                           train_labels=train_labels,
                                           links=args.links)
+    if args.dirichlet:
+        stats["dirichlet"] = dirichlet_calibration_evaluation(
+            val_logits, val_labels, test_logits, test_labels,
+            num_classes=num_classes, device=device,
+            train_logits=train_logits,
+            train_labels=train_labels,
+            cv_folds=args.dirichlet_cv_folds,
+            seed=args.seed)
     # stats = round_floats(stats)
 
     def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
