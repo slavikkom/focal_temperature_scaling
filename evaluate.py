@@ -4,6 +4,7 @@ import torch
 import json
 import random
 import argparse
+import numpy as np
 from torch import nn
 import matplotlib.pyplot as plt
 import torch.backends.cudnn as cudnn
@@ -155,8 +156,29 @@ def parseArgs():
         help="Save validation logits, labels, and indices to file.")
     parser.add_argument("--save-test-logits", action="store_true", dest="save_test_logits",
         help="Save test logits, labels, and indices to file.")
+    parser.add_argument("--json-precision", type=int, default=5, dest="json_precision",
+        help="Number of decimal places to keep for floating point values saved to JSON.")
 
     return parser.parse_args()
+
+def round_floats_for_json(obj, precision=5):
+    if isinstance(obj, float):
+        return round(obj, precision)
+    if isinstance(obj, np.floating):
+        return round(float(obj), precision)
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.ndarray):
+        return round_floats_for_json(obj.tolist(), precision)
+    if torch.is_tensor(obj):
+        return round_floats_for_json(obj.detach().cpu().tolist(), precision)
+    if isinstance(obj, dict):
+        return {k: round_floats_for_json(v, precision) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [round_floats_for_json(v, precision) for v in obj]
+    if isinstance(obj, tuple):
+        return tuple(round_floats_for_json(v, precision) for v in obj)
+    return obj
 
 def get_logits_labels(data_loader, net, device):
     logits_list = []
@@ -373,16 +395,6 @@ if __name__ == "__main__":
     nll = nll_criterion(logits, labels).item()
     
 
-    # def round_floats(obj, precision=6):
-    #     if isinstance(obj, float):
-    #         return round(obj, precision)
-    #     elif isinstance(obj, dict):
-    #         return {k: round_floats(v, precision) for k, v in obj.items()}
-    #     elif isinstance(obj, list):
-    #         return [round_floats(i, precision) for i in obj]
-    #     else:
-    #         return obj
-
     stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
                                           num_classes=num_classes, device=device,
                                           train_logits=train_logits,
@@ -419,7 +431,7 @@ if __name__ == "__main__":
         saved_stats_name = model_stem
     save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
     with open(save_stats_path + ".json", 'w') as f:
-        json.dump(stats, f)
+        json.dump(round_floats_for_json(stats, args.json_precision), f)
 
     if args.save_train_logits:
         save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels)
