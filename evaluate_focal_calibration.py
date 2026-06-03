@@ -1,5 +1,6 @@
 import torch
 from torch import nn
+import numpy as np
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from temperature_scaling import ModelWithTemperature
@@ -70,6 +71,31 @@ def _probs_to_tensor(probs, device):
     return torch.as_tensor(probs, dtype=torch.float32, device=device)
 
 
+def _to_numpy_array(values):
+    if torch.is_tensor(values):
+        return values.detach().cpu().numpy()
+    return np.asarray(values)
+
+
+def _add_missing_class_examples(probs, labels, num_classes):
+    present_classes = set(np.asarray(labels).astype(int).ravel().tolist())
+    missing_classes = [
+        class_idx for class_idx in range(num_classes)
+        if class_idx not in present_classes
+    ]
+    if not missing_classes:
+        return probs, labels
+
+    eps = 1e-6
+    pseudo_probs = np.full((len(missing_classes), num_classes), eps)
+    pseudo_probs[np.arange(len(missing_classes)), missing_classes] = (
+        1.0 - eps * (num_classes - 1)
+    )
+    probs = np.vstack([probs, pseudo_probs.astype(probs.dtype, copy=False)])
+    labels = np.concatenate([labels, np.asarray(missing_classes, dtype=labels.dtype)])
+    return probs, labels
+
+
 def _dirichlet_key(reg_lambda, reg_mu):
     return "lambda_{:.0e}_mu_{:.0e}".format(reg_lambda, reg_mu)
 
@@ -97,66 +123,99 @@ def _compact_cv_results(cv_results):
 def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_labels,
                                      num_classes=10, device='cuda',
                                      train_logits=None, train_labels=None,
-                                     reg_grid=None, cv_folds=3, seed=1):
+                                     reg_grid=None, cv_folds=3, seed=1, smoke_test=False):
     if reg_grid is None:
         reg_grid = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
     val_probs = get_probs(val_logits, T=1, a=1, link='softmax')
     test_probs = get_probs(test_logits, T=1, a=1, link='softmax')
     val_labels_cv = val_labels.long()
+    val_probs_cv = _to_numpy_array(val_probs)
+    test_probs_cv = _to_numpy_array(test_probs)
+    val_labels_cv_np = _to_numpy_array(val_labels_cv)
 
-    # how many examples per class in the validation set? We need at least 2 for each class to do cross-validation, 
-    # and we can't have more folds than the smallest class count. 
-    # So we compute the class counts and determine the number of splits accordingly.
-    class_counts = torch.bincount(val_labels_cv, minlength=num_classes)
-    nonzero_class_counts = class_counts[class_counts > 0]
-    min_class_count = int(nonzero_class_counts.min().item()) if nonzero_class_counts.numel() else 0
-    n_splits = min(cv_folds, min_class_count)
-    if n_splits < 2:
-        raise ValueError(
-            "Dirichlet GridSearchCV needs at least two validation examples per "
-            "present class; smallest present class count is {}.".format(min_class_count)
+    if smoke_test:
+        smoke_reg_lambda = 1e-3
+        smoke_reg_mu = 0.0
+        # a rememdy since dirichlet implementation requires the number of unique classes
+        # within the val_labels array to be equal to the number of classes specified by num_classes, 
+        # so we add one example for any missing class with a very small probability to avoid affecting the results.
+        # this hack is only for the smoke test to run without errors and should not affect the results
+        fit_probs_cv, fit_labels_cv_np = _add_missing_class_examples(
+            val_probs_cv, val_labels_cv_np, num_classes
         )
+        estimator = FullDirichletCalibrator(
+            reg_lambda=smoke_reg_lambda,
+            reg_mu=smoke_reg_mu,
+            max_iter=25,
+        ).fit(fit_probs_cv, fit_labels_cv_np)
+        best_params = {"reg_lambda": 1e-3, "reg_mu": 0}
+        best_score = -float(estimator.final_loss)
+        n_splits = 0
+        selection_metric = "train_neg_log_loss_smoke_test"
+        param_grid = {
+            "reg_lambda": [smoke_reg_lambda],
+            "reg_mu": [smoke_reg_mu],
+        }
+        cv_results = {}
+    else:
+        # how many examples per class in the validation set? We need at least 2 for each class to do cross-validation, 
+        # and we can't have more folds than the smallest class count. 
+        # So we compute the class counts and determine the number of splits accordingly.
+        class_counts = torch.bincount(val_labels_cv, minlength=num_classes)
+        nonzero_class_counts = class_counts[class_counts > 0]
+        min_class_count = int(nonzero_class_counts.min().item()) if nonzero_class_counts.numel() else 0
+        n_splits = min(cv_folds, min_class_count)
+        if n_splits < 2:
+            raise ValueError(
+                "Dirichlet GridSearchCV needs at least two validation examples per "
+                "present class; smallest present class count is {}.".format(min_class_count)
+            )
 
-    param_grid = {
-        "reg_lambda": reg_grid,
-        "reg_mu": reg_grid,
-    }
-    cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
-    grid_search = GridSearchCV(
-        FullDirichletCalibrator(),
-        param_grid=param_grid,
-        cv=cv,
-        scoring="neg_log_loss",
-        refit=True,
-    )
-    grid_search.fit(val_probs, val_labels_cv)
+        param_grid = {
+            "reg_lambda": reg_grid,
+            "reg_mu": reg_grid,
+        }
+        cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+        grid_search = GridSearchCV(
+            FullDirichletCalibrator(),
+            param_grid=param_grid,
+            cv=cv,
+            scoring="neg_log_loss",
+            refit=True,
+        )
+        grid_search.fit(val_probs_cv, val_labels_cv_np)
 
-    best_params = grid_search.best_params_
+        estimator = grid_search
+        best_params = grid_search.best_params_
+        best_score = float(grid_search.best_score_)
+        selection_metric = "neg_log_loss"
+        cv_results = _compact_cv_results(grid_search.cv_results_)
     result = {
-        "selection_metric": "neg_log_loss",
+        "selection_metric": selection_metric,
         "cv_folds": n_splits,
         "param_grid": {
-            "reg_lambda": [float(v) for v in reg_grid],
-            "reg_mu": [float(v) for v in reg_grid],
+            "reg_lambda": [float(v) for v in param_grid["reg_lambda"]],
+            "reg_mu": [float(v) for v in param_grid["reg_mu"]],
         },
         "best": {
             "key": _dirichlet_key(best_params["reg_lambda"], best_params["reg_mu"]),
             "reg_lambda": float(best_params["reg_lambda"]),
             "reg_mu": float(best_params["reg_mu"]),
-            "mean_test_neg_log_loss": float(grid_search.best_score_),
+            "mean_test_neg_log_loss": best_score,
         },
-        "cv_results": _compact_cv_results(grid_search.cv_results_),
+        "cv_results": cv_results,
     }
 
-    val_cal_probs = _probs_to_tensor(grid_search.predict_proba(val_probs), device)
-    test_cal_probs = _probs_to_tensor(grid_search.predict_proba(test_probs), device)
+    val_cal_probs = _probs_to_tensor(estimator.predict_proba(val_probs_cv), device)
+    test_cal_probs = _probs_to_tensor(estimator.predict_proba(test_probs_cv), device)
     result["val"] = evaluate(val_labels, val_cal_probs, num_classes=num_classes)
     result["test"] = evaluate(test_labels, test_cal_probs, num_classes=num_classes)
 
     if train_logits is not None and train_labels is not None:
         train_probs = get_probs(train_logits, T=1, a=1, link='softmax')
-        train_cal_probs = _probs_to_tensor(grid_search.predict_proba(train_probs), device)
+        train_probs_cv = _to_numpy_array(train_probs)
+        train_cal_probs = _probs_to_tensor(estimator.predict_proba(train_probs_cv), device)
         result["train"] = evaluate(train_labels, train_cal_probs, num_classes=num_classes)
 
     return {
