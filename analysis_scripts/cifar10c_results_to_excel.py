@@ -32,7 +32,7 @@ DEFAULT_OUTPUT_PATH = REPO_ROOT / "analysis_scripts" / "CIFAR10C_results.xlsx"
 DEFAULT_SEVERITIES = (0, 1, 2, 3, 4, 5)
 DEFAULT_SEEDS = (42, 123, 2023)
 DEFAULT_SPLITS = ("train", "val", "test")
-DEFAULT_CALIBRATIONS = ("uncalibrated", "calibrated")
+DEFAULT_CALIBRATIONS = ("uncalibrated", "calibrated", "dirichlet")
 
 
 @dataclass(frozen=True)
@@ -51,8 +51,8 @@ APPROACH_PATTERNS = (
     {
         "loss": "cross_entropy",
         "display": "Cross-Entropy",
-        "regex": re.compile(r"^resnet50_cross_entropy_(?P<epoch>\d+)\.json$"),
-        "clean_file": "resnet50_cross_entropy_{epoch}.json",
+        "regex": re.compile(r"^(?P<prefix>resnet50_)?cross_entropy_(?P<epoch>\d+)\.json$"),
+        "clean_file": "{prefix}cross_entropy_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
         "sort": 0,
@@ -60,8 +60,10 @@ APPROACH_PATTERNS = (
     {
         "loss": "cross_entropy_label_smoothing",
         "display": "Cross-Entropy label_smoothing={param:g}",
-        "regex": re.compile(r"^resnet50_cross_entropy_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"),
-        "clean_file": "cross_entropy_{param}_{epoch}.json",
+        "regex": re.compile(
+            r"^(?P<prefix>resnet50_)?cross_entropy_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"
+        ),
+        "clean_file": "{prefix}cross_entropy_{param}_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
         "sort": 0.1,
@@ -69,8 +71,8 @@ APPROACH_PATTERNS = (
     {
         "loss": "brier_score",
         "display": "Brier Score",
-        "regex": re.compile(r"^resnet50_brier_score_(?P<epoch>\d+)\.json$"),
-        "clean_file": "brier_score_{epoch}.json",
+        "regex": re.compile(r"^(?P<prefix>resnet50_)?brier_score_(?P<epoch>\d+)\.json$"),
+        "clean_file": "{prefix}brier_score_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
         "sort": 0.2,
@@ -149,7 +151,13 @@ METRICS = (
     ("smECE 0.05 (%)", "smECE_0.05", 100.0, "0.2f"),
     ("Brier", "Brier", 1.0, "0.4f"),
 )
-AGGREGATED_FIELDS = (*METRICS, ("Temperature", "Temperature", 1.0, "0.2f"))
+PARAMETER_FIELDS = ("Temperature", "Dirichlet lambda", "Dirichlet mu")
+AGGREGATED_FIELDS = (
+    *METRICS,
+    ("Temperature", "Temperature", 1.0, "0.2f"),
+    ("Dirichlet lambda", "Dirichlet lambda", 1.0, "0.2g"),
+    ("Dirichlet mu", "Dirichlet mu", 1.0, "0.2g"),
+)
 _CORRUPTION_INDEX_CACHE = {}
 _SUMMARY_METRIC_INDEX_CACHE = {}
 _SUMMARY_TEMPERATURE_INDEX_CACHE = {}
@@ -206,7 +214,7 @@ def parse_args() -> argparse.Namespace:
         choices=DEFAULT_CALIBRATIONS,
         nargs="+",
         default=list(DEFAULT_CALIBRATIONS),
-        help="Calibration states to include as rows. Default: uncalibrated calibrated",
+        help="Calibration states to include as rows. Default: uncalibrated calibrated dirichlet",
     )
     parser.add_argument(
         "--cal-criteria",
@@ -228,6 +236,28 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     return parser.parse_args()
+
+
+def resolve_existing_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+
+    cwd_path = path.resolve()
+    if cwd_path.exists():
+        return cwd_path
+
+    return (REPO_ROOT / path).resolve()
+
+
+def resolve_output_path(path: Path) -> Path:
+    if path.is_absolute():
+        return path
+
+    cwd_path = path.resolve()
+    if cwd_path.parent.exists():
+        return cwd_path
+
+    return (REPO_ROOT / path).resolve()
 
 
 def parse_corruption_dir(path: Path) -> tuple[str, int] | None:
@@ -263,10 +293,12 @@ def discover_approaches(results_dir: Path) -> list[Approach]:
                 continue
 
             param_text = match.groupdict().get("param")
+            prefix = match.groupdict().get("prefix") or ""
             epoch = match.groupdict()["epoch"]
             param = float(param_text) if param_text is not None else None
             display = pattern["display"].format(param=param if param is not None else 1.0)
             clean_file_name = pattern["clean_file"].format(
+                prefix=prefix,
                 param=param_text if param_text is not None else "",
                 epoch=epoch,
             )
@@ -315,6 +347,8 @@ def calibration_label(calibration: str) -> str:
         return "T=1"
     if calibration == "calibrated":
         return "T=optimal_T"
+    if calibration == "dirichlet":
+        return "lambda=optimal_lambda, mu=optimal_mu"
     return calibration
 
 
@@ -326,6 +360,8 @@ def get_optimal_temperature(
 ) -> float:
     if calibration == "uncalibrated":
         return 1.0
+    if calibration == "dirichlet":
+        return np.nan
 
     values = data["T_dict"][approach.metric_link_name]
     for key in link_value_keys(approach.metric_link_value):
@@ -340,6 +376,15 @@ def get_optimal_temperature(
     )
 
 
+def get_dirichlet_block(data: dict) -> dict:
+    return data["dirichlet_calibrated"]["softmax"]["full_odir"]
+
+
+def get_dirichlet_parameters(data: dict) -> tuple[float, float]:
+    best = get_dirichlet_block(data)["best"]
+    return float(best["reg_lambda"]), float(best["reg_mu"])
+
+
 def get_metric_block(
     data: dict,
     approach: Approach,
@@ -349,6 +394,8 @@ def get_metric_block(
 ) -> dict:
     if calibration == "uncalibrated":
         block = data[split]["uncalibrated"][approach.metric_link_name]
+    elif calibration == "dirichlet":
+        return get_dirichlet_block(data)[split]
     else:
         block = data[split]["calibrated"][cal_criteria][approach.metric_link_name]
 
@@ -408,6 +455,12 @@ def collect_records(
                             continue
 
                     for calibration in calibrations:
+                        if (
+                            calibration == "dirichlet"
+                            and "dirichlet_calibrated" not in data
+                        ):
+                            continue
+
                         try:
                             temperature = get_optimal_temperature(
                                 data,
@@ -415,9 +468,13 @@ def collect_records(
                                 calibration=calibration,
                                 cal_criteria=cal_criteria,
                             )
+                            if calibration == "dirichlet":
+                                dirichlet_lambda, dirichlet_mu = get_dirichlet_parameters(data)
+                            else:
+                                dirichlet_lambda, dirichlet_mu = np.nan, np.nan
                         except Exception as exc:
                             warnings.append(
-                                f"Could not read temperature from {path} "
+                                f"Could not read calibration parameters from {path} "
                                 f"({calibration}): {exc}"
                             )
                             continue
@@ -454,6 +511,8 @@ def collect_records(
                                 "severity": severity,
                                 "seed": seed,
                                 "Temperature": temperature,
+                                "Dirichlet lambda": dirichlet_lambda,
+                                "Dirichlet mu": dirichlet_mu,
                             }
                             for display_name, raw_name, scale, _ in METRICS:
                                 if raw_name not in metric_block:
@@ -470,7 +529,7 @@ def collect_records(
 
 
 def selection_loss_name(loss_name: str) -> str:
-    if loss_name in {"cross_entropy", "cross_entropy_label_smoothing"}:
+    if loss_name == "cross_entropy":
         return "cross_entropy"
     return loss_name
 
@@ -534,7 +593,7 @@ def summary_across_corruptions(agg_df: pd.DataFrame) -> pd.DataFrame:
             sort=False,
         ):
             values = group[mean_col].dropna()
-            if metric_name == "Temperature" or split != "test" or severity == 0:
+            if metric_name in PARAMETER_FIELDS or split != "test" or severity == 0:
                 std_value = group[std_col].dropna().mean()
             else:
                 std_value = values.std(ddof=1) if len(values) > 1 else np.nan
@@ -561,7 +620,7 @@ def summary_across_corruptions(agg_df: pd.DataFrame) -> pd.DataFrame:
             ]
             for label, label_group in overall_specs:
                 values = label_group[mean_col].dropna()
-                if metric_name == "Temperature" or split != "test":
+                if metric_name in PARAMETER_FIELDS or split != "test":
                     std_value = label_group[std_col].dropna().mean()
                 else:
                     std_value = values.std(ddof=1) if len(values) > 1 else np.nan
@@ -641,40 +700,46 @@ def summary_metric_values_from_row(row: pd.Series | None) -> tuple[float | str, 
     return mean, export_std(row["std"], count)
 
 
-def format_temperature_from_agg(rows: pd.DataFrame) -> str:
-    if rows.empty or "Temperature_mean" not in rows.columns:
+def format_parameter_from_agg_row(
+    row: pd.Series | None,
+    metric_name: str,
+    fmt: str,
+) -> str:
+    if row is None:
         return ""
-    temp_rows = rows.dropna(subset=["Temperature_mean"])
-    if temp_rows.empty:
+    mean_col = f"{metric_name}_mean"
+    std_col = f"{metric_name}_std"
+    count_col = f"{metric_name}_count"
+    if mean_col not in row or pd.isna(row[mean_col]):
         return ""
-    if "split" in temp_rows.columns:
-        temp_rows = temp_rows[temp_rows["split"] == "test"]
-        if temp_rows.empty:
-            temp_rows = rows.dropna(subset=["Temperature_mean"])
-    if "severity" in temp_rows.columns:
-        temp_rows = temp_rows.sort_values("severity", key=lambda col: col.astype(str))
-    item = temp_rows.iloc[0]
     return format_cell(
-        item["Temperature_mean"],
-        item["Temperature_std"],
-        int(item["Temperature_count"]),
-        "0.2f",
+        row[mean_col],
+        row[std_col],
+        int(row[count_col]),
+        fmt,
     )
 
 
-def format_temperature_from_summary(rows: pd.DataFrame) -> str:
-    temp_rows = rows[(rows["metric"] == "Temperature") & (rows["split"] == "test")]
-    if temp_rows.empty:
-        temp_rows = rows[rows["metric"] == "Temperature"]
-    if temp_rows.empty:
+def format_parameter_from_summary_row(row: pd.Series | None, fmt: str) -> str:
+    if row is None:
         return ""
-    temp_rows = temp_rows.sort_values("severity", key=lambda col: col.astype(str))
-    return format_summary_metric_from_row(temp_rows.iloc[0], "0.2f")
+    if pd.isna(row["mean"]):
+        return ""
+    return format_summary_metric_from_row(row, fmt)
 
 
-def approach_with_temperature(approach: str, temperature: str) -> str:
+def approach_with_parameters(
+    approach: str,
+    temperature: str = "",
+    dirichlet_lambda: str = "",
+    dirichlet_mu: str = "",
+) -> str:
     if "T=optimal_T" in approach and temperature:
-        return approach.replace("T=optimal_T", f"T={temperature}")
+        approach = approach.replace("T=optimal_T", f"T={temperature}")
+    if "lambda=optimal_lambda" in approach and dirichlet_lambda:
+        approach = approach.replace("lambda=optimal_lambda", f"lambda={dirichlet_lambda}")
+    if "mu=optimal_mu" in approach and dirichlet_mu:
+        approach = approach.replace("mu=optimal_mu", f"mu={dirichlet_mu}")
     return approach
 
 
@@ -794,9 +859,9 @@ def summary_metric_index(summary_df: pd.DataFrame, metric_name: str) -> pd.DataF
 def summary_temperature_index(summary_df: pd.DataFrame) -> pd.DataFrame:
     key = id(summary_df)
     if key not in _SUMMARY_TEMPERATURE_INDEX_CACHE:
-        temp_summary = summary_df[summary_df["metric"] == "Temperature"]
+        temp_summary = summary_df[summary_df["metric"].isin(PARAMETER_FIELDS)]
         _SUMMARY_TEMPERATURE_INDEX_CACHE[key] = temp_summary.set_index(
-            ["approach_calibration", "split", "severity"], drop=False
+            ["approach_calibration", "split", "severity", "metric"], drop=False
         )
     return _SUMMARY_TEMPERATURE_INDEX_CACHE[key]
 
@@ -820,11 +885,15 @@ def metric_table_for_corruption(
         train_row = index_lookup(indexed, (approach, "train", first_severity))
         val_row = index_lookup(indexed, (approach, "val", first_severity))
         row = {
-            "Approach": approach_with_temperature(
+            "Approach": approach_with_parameters(
                 approach,
-                format_metric_from_row(temp_row, "Temperature", "0.2f")
-                if temp_row is not None
-                else "",
+                temperature=format_parameter_from_agg_row(temp_row, "Temperature", "0.2f"),
+                dirichlet_lambda=format_parameter_from_agg_row(
+                    temp_row, "Dirichlet lambda", "0.2g"
+                ),
+                dirichlet_mu=format_parameter_from_agg_row(
+                    temp_row, "Dirichlet mu", "0.2g"
+                ),
             ),
         }
         if separate_std_columns:
@@ -898,15 +967,19 @@ def metric_table_for_summary(
     first_severity = first_table_severity(severities)
 
     for approach in approaches:
-        temp_row = index_lookup(temp_index, (approach, "test", first_severity))
+        temp_row = index_lookup(temp_index, (approach, "test", first_severity, "Temperature"))
+        lambda_row = index_lookup(
+            temp_index, (approach, "test", first_severity, "Dirichlet lambda")
+        )
+        mu_row = index_lookup(temp_index, (approach, "test", first_severity, "Dirichlet mu"))
         train_row = index_lookup(metric_index, (approach, "train", first_severity))
         val_row = index_lookup(metric_index, (approach, "val", first_severity))
         row = {
-            "Approach": approach_with_temperature(
+            "Approach": approach_with_parameters(
                 approach,
-                format_summary_metric_from_row(temp_row, "0.2f")
-                if temp_row is not None
-                else "",
+                temperature=format_parameter_from_summary_row(temp_row, "0.2f"),
+                dirichlet_lambda=format_parameter_from_summary_row(lambda_row, "0.2g"),
+                dirichlet_mu=format_parameter_from_summary_row(mu_row, "0.2g"),
             ),
         }
         if separate_std_columns:
@@ -1014,7 +1087,8 @@ def write_workbook(
             "smECE 0.05 uses the fixed bandwidth. "
             "Train and validation are shown in separate columns; severity columns show test only. "
             "Rows are selected by lowest validation Logloss within each loss family and calibration state. "
-            "Calibrated rows use CE-selected temperature scaling."
+            "Calibrated rows use CE-selected temperature scaling. "
+            "Dirichlet rows use softmax full ODIR with selected lambda and mu."
         )
         corruption_note = (
             "Values are mean +/- std across seeds. "
@@ -1022,7 +1096,8 @@ def write_workbook(
             "smECE 0.05 uses the fixed bandwidth. "
             "Train and validation are shown in separate columns; severity columns show test only. "
             "Rows are selected by lowest validation Logloss within each loss family and calibration state. "
-            "Calibrated rows use CE-selected temperature scaling."
+            "Calibrated rows use CE-selected temperature scaling. "
+            "Dirichlet rows use softmax full ODIR with selected lambda and mu."
         )
         summary_tables = [
             (
@@ -1085,9 +1160,9 @@ def write_workbook(
 
 def main() -> None:
     args = parse_args()
-    results_dir = args.results_dir.resolve()
-    clean_results_dir = args.clean_results_dir.resolve()
-    output_path = args.output.resolve()
+    results_dir = resolve_existing_path(args.results_dir)
+    clean_results_dir = resolve_existing_path(args.clean_results_dir)
+    output_path = resolve_output_path(args.output)
 
     if not results_dir.exists():
         raise FileNotFoundError(f"Results directory does not exist: {results_dir}")
