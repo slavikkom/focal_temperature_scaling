@@ -94,6 +94,60 @@ removes softmax redundancy and improves identifiability.
 The default is `initializer="identity"`, which starts optimization near the
 identity calibration map. This is usually the safest default.
 
+## Evaluation Runtime Controls
+
+`evaluate.py --dirichlet` evaluates full ODIR calibration on softmax
+probabilities. By default it searches a 5-value grid for both `reg_lambda` and
+`reg_mu` with 3 validation folds:
+
+```text
+5 lambda values * 5 mu values * 3 folds = 75 fits
+```
+
+`GridSearchCV(refit=True)` then fits the best setting once more on the full
+validation set. Each fit runs PyTorch LBFGS, so this can noticeably increase
+evaluation time.
+
+Use these command-line knobs to trade off runtime and search thoroughness:
+
+| Option | Default | Effect |
+| --- | --- | --- |
+| `--dirichlet-reg-grid` | `1e-1 1e-2 1e-3 1e-4 1e-5` | Sets the shared grid used for both `reg_lambda` and `reg_mu`. Fewer values reduce fits quadratically. |
+| `--dirichlet-cv-folds` | `3` | Sets validation folds. Fewer folds reduce fits linearly. |
+| `--dirichlet-max-iter` | `1024` | Caps LBFGS iterations per fit. Lower values can speed up runs but may underfit the calibration map. |
+| `--dirichlet-n-jobs` | `1` | Runs independent GridSearchCV fits in parallel. Useful on CPU; be careful when using GPU because multiple workers may contend for the same device. |
+
+For a faster exploratory run:
+
+```bash
+python evaluate.py --dirichlet \
+  --dirichlet-reg-grid 1e-2 1e-3 \
+  --dirichlet-max-iter 100 \
+  --dirichlet-n-jobs 4
+```
+
+This changes the search from 75 CV fits to:
+
+```text
+2 lambda values * 2 mu values * 3 folds = 12 fits
+```
+
+plus the final refit.
+
+### Modification: LBFGS Regularization Cache
+
+This modification was to improve performance of the code. The PyTorch LBFGS optimizer calls its closure many times during each fit,
+especially when using the strong Wolfe line search. The regularization tensors
+used by the objective are constant for a given fit: identity masks, zero
+columns, and identity targets do not depend on the current LBFGS weights.
+
+`Calibs/multinomial.py` therefore builds this regularization context once per
+fit and passes it into the objective instead of recreating `torch.eye`,
+`torch.zeros`, and `torch.hstack` on every closure call. This does not change
+the calibration objective; it only removes repeated tensor allocation from the
+inner optimization loop. The largest runtime savings still usually come from a
+smaller grid, fewer iterations, or parallel GridSearchCV workers.
+
 ## Near One-Hot Probabilities
 
 All of these calibrators have limited ability to change predictions that are

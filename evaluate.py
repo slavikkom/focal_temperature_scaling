@@ -139,6 +139,15 @@ def parseArgs():
     parser.add_argument("--dirichlet-cv-folds", type=int, default=3,
                         dest="dirichlet_cv_folds",
                         help="Number of validation-folds for Dirichlet GridSearchCV")
+    parser.add_argument("--dirichlet-reg-grid", nargs="+", type=float, default=None,
+                        dest="dirichlet_reg_grid",
+                        help="Regularization values for Dirichlet lambda and mu grid search")
+    parser.add_argument("--dirichlet-max-iter", type=int, default=1024,
+                        dest="dirichlet_max_iter",
+                        help="Maximum LBFGS iterations for each Dirichlet fit")
+    parser.add_argument("--dirichlet-n-jobs", type=int, default=1,
+                        dest="dirichlet_n_jobs",
+                        help="Parallel GridSearchCV workers for Dirichlet calibration")
     parser.add_argument("--corruption", type=str, default="gaussian_noise",
                         dest="corruption",
                         help="CIFAR-10-C corruption to evaluate, or 'all'")
@@ -464,6 +473,9 @@ if __name__ == "__main__":
             train_logits=train_logits,
             train_labels=train_labels,
             cv_folds=args.dirichlet_cv_folds,
+            reg_grid=args.dirichlet_reg_grid,
+            max_iter=args.dirichlet_max_iter,
+            n_jobs=args.dirichlet_n_jobs,
             seed=args.seed,
             smoke_test=args.smoke_test)
     # stats = round_floats(stats)

@@ -173,8 +173,10 @@ def _objective(params, *args):
     params_t = torch.as_tensor(params, dtype=torch.float64, device=device)
     X_t = _as_torch(X, device)
     y_t = _as_torch(y, device)
+    reg_context = _get_regularization_context(
+        X_t, k, reg_mu=reg_mu, reg_format=reg_format)
     loss = _objective_torch(params_t, X_t, y_t, k, method, reg_lambda, reg_mu,
-                            ref_row, reg_format)
+                            ref_row, reg_format, reg_context)
     return float(loss.detach().cpu())
 
 
@@ -185,8 +187,10 @@ def _gradient(params, *args):
                             requires_grad=True)
     X_t = _as_torch(X, device)
     y_t = _as_torch(y, device)
+    reg_context = _get_regularization_context(
+        X_t, k, reg_mu=reg_mu, reg_format=reg_format)
     loss = _objective_torch(params_t, X_t, y_t, k, method, reg_lambda, reg_mu,
-                            ref_row, reg_format)
+                            ref_row, reg_format, reg_context)
     loss.backward()
     return params_t.grad.detach().cpu().numpy()
 
@@ -198,33 +202,40 @@ def _hessian(params, *args):
     y_t = _as_torch(y, device)
 
     def closure(params_t):
+        reg_context = _get_regularization_context(
+            X_t, k, reg_mu=reg_mu, reg_format=reg_format)
         return _objective_torch(params_t, X_t, y_t, k, method, reg_lambda,
-                                reg_mu, ref_row, reg_format)
+                                reg_mu, ref_row, reg_format, reg_context)
 
     params_t = torch.as_tensor(params, dtype=torch.float64, device=device)
     return torch.autograd.functional.hessian(closure, params_t).detach().cpu().numpy()
 
 
+def _get_regularization_context(X, k, reg_mu, reg_format):
+    eye = torch.eye(k, dtype=X.dtype, device=X.device)
+    zeros_col = torch.zeros((k, 1), dtype=X.dtype, device=X.device)
+    if reg_mu is None:
+        if reg_format == 'identity':
+            return torch.hstack([eye, zeros_col])
+        return torch.zeros((k, k + 1), dtype=X.dtype, device=X.device)
+
+    return torch.hstack([eye, zeros_col])
+
+
 def _objective_torch(params, X, y, k, method, reg_lambda, reg_mu, ref_row,
-                     reg_format):
+                     reg_format, reg_context=None):
     weights = _get_weights_torch(params, k, ref_row, method)
     logits = torch.matmul(X, weights.transpose(0, 1))
     loss = torch.mean(-torch.sum(y * F.log_softmax(logits, dim=1), dim=1))
 
+    if reg_context is None:
+        reg_context = _get_regularization_context(
+            X, k, reg_mu=reg_mu, reg_format=reg_format)
+
     if reg_mu is None:
-        if reg_format == 'identity':
-            reg = torch.hstack([
-                torch.eye(k, dtype=X.dtype, device=X.device),
-                torch.zeros((k, 1), dtype=X.dtype, device=X.device)
-            ])
-        else:
-            reg = torch.zeros((k, k + 1), dtype=X.dtype, device=X.device)
-        loss = loss + reg_lambda * torch.sum((weights - reg) ** 2)
+        loss = loss + reg_lambda * torch.sum((weights - reg_context) ** 2)
     else:
-        weights_hat = weights - torch.hstack([
-            weights[:, :-1] * torch.eye(k, dtype=X.dtype, device=X.device),
-            torch.zeros((k, 1), dtype=X.dtype, device=X.device)
-        ])
+        weights_hat = weights * (1.0 - reg_context)
         loss = loss + reg_lambda * torch.sum(weights_hat[:, :-1] ** 2) + \
             reg_mu * torch.sum(weights_hat[:, -1] ** 2)
 
@@ -332,17 +343,22 @@ def _torch_lbfgs_update(weights_0, X, target, k, method_, maxiter=int(1024),
         [weights], lr=lr, max_iter=maxiter, tolerance_grad=gtol,
         tolerance_change=ftol, line_search_fn='strong_wolfe')
 
+    reg_context = _get_regularization_context(
+        X_t, k, reg_mu=reg_mu, reg_format=reg_format)
+
     def closure():
         optimizer.zero_grad()
         loss = _objective_torch(weights, X_t, target_t, k, method_,
-                                reg_lambda, reg_mu, ref_row, reg_format)
+                                reg_lambda, reg_mu, ref_row, reg_format,
+                                reg_context)
         loss.backward()
         return loss
 
     optimizer.step(closure)
 
     final_loss = _objective_torch(weights, X_t, target_t, k, method_,
-                                  reg_lambda, reg_mu, ref_row, reg_format)
+                                  reg_lambda, reg_mu, ref_row, reg_format,
+                                  reg_context)
     logging.debug("%s: final log-loss = %.7e", method_, float(final_loss))
 
     return weights.detach().cpu().numpy()

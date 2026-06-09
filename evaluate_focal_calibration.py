@@ -123,7 +123,8 @@ def _compact_cv_results(cv_results):
 def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_labels,
                                      num_classes=10, device='cuda',
                                      train_logits=None, train_labels=None,
-                                     reg_grid=None, cv_folds=3, seed=1, smoke_test=False):
+                                     reg_grid=None, cv_folds=3, max_iter=1024,
+                                     n_jobs=1, seed=1, smoke_test=False):
     if reg_grid is None:
         reg_grid = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
@@ -147,7 +148,8 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
         estimator = FullDirichletCalibrator(
             reg_lambda=smoke_reg_lambda,
             reg_mu=smoke_reg_mu,
-            max_iter=25,
+            max_iter=min(max_iter, 25),
+            device=device,
         ).fit(fit_probs_cv, fit_labels_cv_np)
         best_params = {"reg_lambda": 1e-3, "reg_mu": 0}
         best_score = -float(estimator.final_loss)
@@ -178,11 +180,12 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
         }
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
         grid_search = GridSearchCV(
-            FullDirichletCalibrator(),
+            FullDirichletCalibrator(max_iter=max_iter, device=device),
             param_grid=param_grid,
             cv=cv,
             scoring="neg_log_loss",
             refit=True,
+            n_jobs=n_jobs,
         )
         grid_search.fit(val_probs_cv, val_labels_cv_np)
 
