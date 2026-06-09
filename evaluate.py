@@ -180,6 +180,37 @@ def round_floats_for_json(obj, precision=5):
         return tuple(round_floats_for_json(v, precision) for v in obj)
     return obj
 
+def merge_evaluation_stats(existing_stats, new_stats, replace_keys=None):
+    if replace_keys is None:
+        replace_keys = set(link_dict.keys())
+
+    if not isinstance(existing_stats, dict) or not isinstance(new_stats, dict):
+        return new_stats
+
+    merged_stats = dict(existing_stats)
+    for key, value in new_stats.items():
+        if key in merged_stats and key not in replace_keys:
+            merged_stats[key] = merge_evaluation_stats(
+                merged_stats[key], value, replace_keys=replace_keys
+            )
+        else:
+            merged_stats[key] = value
+    return merged_stats
+
+def merge_with_existing_json(stats, json_path):
+    if not os.path.exists(json_path):
+        return stats
+
+    with open(json_path, 'r') as f:
+        existing_stats = json.load(f)
+
+    if not isinstance(existing_stats, dict):
+        raise ValueError(
+            "Existing evaluation JSON must contain an object at the top level: {}".format(json_path)
+        )
+
+    return merge_evaluation_stats(existing_stats, stats)
+
 def get_logits_labels(data_loader, net, device):
     logits_list = []
     labels_list = []
@@ -430,8 +461,11 @@ if __name__ == "__main__":
     else:
         saved_stats_name = model_stem
     save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
-    with open(save_stats_path + ".json", 'w') as f:
-        json.dump(round_floats_for_json(stats, args.json_precision), f)
+    save_stats_json_path = save_stats_path + ".json"
+    rounded_stats = round_floats_for_json(stats, args.json_precision)
+    merged_stats = merge_with_existing_json(rounded_stats, save_stats_json_path)
+    with open(save_stats_json_path, 'w') as f:
+        json.dump(merged_stats, f)
 
     if args.save_train_logits:
         save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels)
