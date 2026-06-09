@@ -31,6 +31,11 @@ from Metrics.metrics import ECELoss, AdaptiveECELoss, ClasswiseECELoss
 from temperature_scaling import ModelWithTemperature
 from evaluate_focal_calibration import *
 
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
 medmnist_datasets = [
     'pathmnist', 
     'dermamnist', 
@@ -199,7 +204,7 @@ def merge_evaluation_stats(existing_stats, new_stats, replace_keys=None):
 
 def merge_with_existing_json(stats, json_path):
     if not os.path.exists(json_path):
-        return stats
+        return stats, False
 
     with open(json_path, 'r') as f:
         existing_stats = json.load(f)
@@ -209,7 +214,28 @@ def merge_with_existing_json(stats, json_path):
             "Existing evaluation JSON must contain an object at the top level: {}".format(json_path)
         )
 
-    return merge_evaluation_stats(existing_stats, stats)
+    return merge_evaluation_stats(existing_stats, stats), True
+
+def save_evaluation_json(stats, json_path):
+    lock_file = None
+    lock_path = json_path + ".lock"
+    try:
+        if fcntl is not None:
+            lock_file = open(lock_path, 'w')
+            fcntl.flock(lock_file, fcntl.LOCK_EX)
+
+        merged_stats, merged_existing_json = merge_with_existing_json(stats, json_path)
+        if merged_existing_json:
+            print("Updating existing evaluation JSON: {}".format(json_path))
+        else:
+            print("Writing new evaluation JSON: {}".format(json_path))
+
+        with open(json_path, 'w') as f:
+            json.dump(merged_stats, f)
+    finally:
+        if lock_file is not None:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
 
 def get_logits_labels(data_loader, net, device):
     logits_list = []
@@ -463,9 +489,7 @@ if __name__ == "__main__":
     save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
     save_stats_json_path = save_stats_path + ".json"
     rounded_stats = round_floats_for_json(stats, args.json_precision)
-    merged_stats = merge_with_existing_json(rounded_stats, save_stats_json_path)
-    with open(save_stats_json_path, 'w') as f:
-        json.dump(merged_stats, f)
+    save_evaluation_json(rounded_stats, save_stats_json_path)
 
     if args.save_train_logits:
         save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels)
