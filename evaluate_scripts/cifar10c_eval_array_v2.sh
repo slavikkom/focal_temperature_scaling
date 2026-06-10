@@ -23,13 +23,22 @@
 #SBATCH --cpus-per-task=4
 
 
-SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
-if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/${SCRIPT_NAME}" ]]; then
-  SCRIPT_DIR="$SLURM_SUBMIT_DIR"
-elif [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/evaluate_scripts/${SCRIPT_NAME}" ]]; then
-  SCRIPT_DIR="${SLURM_SUBMIT_DIR}/evaluate_scripts"
+SCRIPT_NAME="cifar10c_eval_array_v2.sh"
+if [[ -n "${SLURM_SUBMIT_DIR:-}" ]]; then
+  if [[ "$(basename "$SLURM_SUBMIT_DIR")" == "evaluate_scripts" ]]; then
+    SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+    REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  elif [[ -d "${SLURM_SUBMIT_DIR}/evaluate_scripts" ]]; then
+    REPO_ROOT="$SLURM_SUBMIT_DIR"
+    SCRIPT_DIR="${REPO_ROOT}/evaluate_scripts"
+  else
+    echo "Could not infer repo root from SLURM_SUBMIT_DIR=$SLURM_SUBMIT_DIR" >&2
+    echo "Submit from the repo root or from the evaluate_scripts directory." >&2
+    exit 1
+  fi
 else
   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 fi
 SCRIPT_PATH="${SCRIPT_DIR}/${SCRIPT_NAME}"
 cd "$SCRIPT_DIR"
