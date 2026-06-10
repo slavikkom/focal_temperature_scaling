@@ -2,8 +2,10 @@
 # Usage:
 #   bash cifar10c_eval_array_v2.sh help
 #   bash cifar10c_eval_array_v2.sh manifest
-#   bash cifar10c_eval_array_v2.sh missing
-#   sbatch --array=0-<missing_count_minus_1> cifar10c_eval_array_v2.sh selective-run
+#   bash cifar10c_eval_array_v2.sh missing-file
+#   bash cifar10c_eval_array_v2.sh missing-content
+#   sbatch --array=0-<missing_count_minus_1> cifar10c_eval_array_v2.sh selective-run-missing-file
+#   sbatch --array=0-<missing_content_count_minus_1> cifar10c_eval_array_v2.sh selective-run-missing-content
 #   sbatch --array=0-<total_jobs_minus_1> cifar10c_eval_array_v2.sh run-from-scratch
 #
 # Default mode is help. Edit the configuration variables below before running,
@@ -24,7 +26,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
-MODE=${1:-help} # help, manifest, missing, selective-run, or run-from-scratch
+MODE=${1:-help} # help, manifest, missing-file, missing-content, selective-run-*, or run-from-scratch
 
 # Configurable seed list and parameter values
 SEED_DIRS=(42 123 2023)
@@ -70,7 +72,14 @@ EVAL_BASE="../RESULTS/hpc_results_june26/CIFAR10C_epoch${EPOCH}_with_dirichlet"
 
 EXPECTED_FILES_LIST="./cifar10c_expected_files.txt"
 MISSING_FILES_LIST="./cifar10c_missing_files.txt"
+MISSING_CONTENT_FILES_LIST="./cifar10c_missing_content_files.txt"
 EVALUATE_LINKS=(softmax exp_p exp_1mp)
+
+# Required JSON content for missing-content mode. Leave an array empty to skip
+# that check. Top-level keys are checked directly on the root JSON object.
+# T_DICT links are checked under the top-level "T_dict" object.
+REQUIRED_TOP_LEVEL_KEYS=(dirichlet_calibrated)
+REQUIRED_T_DICT_LINKS=(softmax exp_p exp_1mp)
 
 mkdir -p "$EVAL_BASE"
 
@@ -196,6 +205,59 @@ emit_missing_files() {
   done < <(emit_expected_files)
 }
 
+join_by_comma() {
+  local IFS=,
+  printf '%s' "$*"
+}
+
+emit_missing_content_files() {
+  local required_top_level_keys required_t_dict_links
+  required_top_level_keys="$(join_by_comma "${REQUIRED_TOP_LEVEL_KEYS[@]}")"
+  required_t_dict_links="$(join_by_comma "${REQUIRED_T_DICT_LINKS[@]}")"
+
+  emit_expected_files | python -c '
+import json
+import sys
+from pathlib import Path
+
+required_top_level_keys = [key for key in sys.argv[1].split(",") if key]
+required_t_dict_links = [key for key in sys.argv[2].split(",") if key]
+
+for raw_path in sys.stdin:
+    path_text = raw_path.strip()
+    if not path_text:
+        continue
+
+    path = Path(path_text)
+    if not path.exists() or path.stat().st_size == 0:
+        continue
+
+    try:
+        with path.open() as handle:
+            data = json.load(handle)
+    except Exception:
+        print(path_text)
+        continue
+
+    if not isinstance(data, dict):
+        print(path_text)
+        continue
+
+    if any(key not in data for key in required_top_level_keys):
+        print(path_text)
+        continue
+
+    if required_t_dict_links:
+        t_dict = data.get("T_dict")
+        if not isinstance(t_dict, dict):
+            print(path_text)
+            continue
+
+        if any(link not in t_dict for link in required_t_dict_links):
+            print(path_text)
+' "$required_top_level_keys" "$required_t_dict_links"
+}
+
 parse_rerun_target() {
   local target_path="$1"
   local target_abs eval_abs rel_path corrsev result_file result_stem
@@ -280,24 +342,33 @@ print_help() {
 Usage:
   bash $0 help
   bash $0 manifest
-  bash $0 missing
-  sbatch --array=0-<N-1> $0 selective-run
+  bash $0 missing-file
+  bash $0 missing-content
+  sbatch --array=0-<N-1> $0 selective-run-missing-file
+  sbatch --array=0-<N-1> $0 selective-run-missing-content
   sbatch --array=0-<N-1> $0 run-from-scratch
 
 Modes:
-  help             Print this message. This is the default mode.
-  manifest         Write the full list of expected JSON outputs.
-  missing          Write the subset of expected JSON outputs that are absent or empty.
-  selective-run    Run one SLURM array task per path in the missing-files list.
-  run-from-scratch Run the original full evaluation schedule.
+  help                          Print this message. This is the default mode.
+  manifest                      Write the full list of expected JSON outputs.
+  missing-file                  Write expected JSON outputs that are absent or empty.
+  missing-content               Write existing JSON outputs that miss required content.
+  selective-run-missing-file    Run one SLURM array task per missing file.
+  selective-run-missing-content Run one SLURM array task per file with missing content.
+  run-from-scratch              Run the original full evaluation schedule.
 
 Configured paths:
-  EVAL_BASE:           $EVAL_BASE
-  EXPECTED_FILES_LIST: $EXPECTED_FILES_LIST
-  MISSING_FILES_LIST:  $MISSING_FILES_LIST
+  EVAL_BASE:                  $EVAL_BASE
+  EXPECTED_FILES_LIST:        $EXPECTED_FILES_LIST
+  MISSING_FILES_LIST:         $MISSING_FILES_LIST
+  MISSING_CONTENT_FILES_LIST: $MISSING_CONTENT_FILES_LIST
 
 Configured evaluation links:
   ${EVALUATE_LINKS[*]}
+
+Required content for missing-content mode:
+  Top-level keys: ${REQUIRED_TOP_LEVEL_KEYS[*]:-(none)}
+  T_dict links:   ${REQUIRED_T_DICT_LINKS[*]:-(none)}
 
 Current schedule:
   Scratch array jobs: $TOTAL_JOBS
@@ -305,8 +376,9 @@ Current schedule:
 Suggested workflow:
   1. Edit the configuration variables in this script.
   2. Run: bash $0 manifest
-  3. Run: bash $0 missing
-  4. Submit the selective-run command printed by missing mode.
+  3. Run: bash $0 missing-file
+  4. Run: bash $0 missing-content
+  5. Submit the selective-run command printed by the relevant missing mode.
 EOF
 }
 
@@ -323,29 +395,49 @@ case "$MODE" in
     print_sbatch_command "run-from-scratch" "$TOTAL_JOBS"
     exit 0
     ;;
-  missing)
+  missing-file|missing)
     mkdir -p "$(dirname "$MISSING_FILES_LIST")"
     emit_missing_files > "$MISSING_FILES_LIST"
     MISSING_COUNT="$(wc -l < "$MISSING_FILES_LIST")"
     echo "Wrote missing file list: $MISSING_FILES_LIST"
     echo "Missing files: $MISSING_COUNT"
-    print_sbatch_command "selective-run" "$MISSING_COUNT"
+    print_sbatch_command "selective-run-missing-file" "$MISSING_COUNT"
     exit 0
     ;;
-  selective-run|selective_run|selective)
+  missing-content|missing_content)
+    mkdir -p "$(dirname "$MISSING_CONTENT_FILES_LIST")"
+    emit_missing_content_files > "$MISSING_CONTENT_FILES_LIST"
+    MISSING_CONTENT_COUNT="$(wc -l < "$MISSING_CONTENT_FILES_LIST")"
+    echo "Wrote missing-content file list: $MISSING_CONTENT_FILES_LIST"
+    echo "Files with missing content: $MISSING_CONTENT_COUNT"
+    echo "Required top-level keys: ${REQUIRED_TOP_LEVEL_KEYS[*]:-(none)}"
+    echo "Required T_dict links: ${REQUIRED_T_DICT_LINKS[*]:-(none)}"
+    print_sbatch_command "selective-run-missing-content" "$MISSING_CONTENT_COUNT"
+    exit 0
+    ;;
+  selective-run|selective_run|selective|selective-run-missing-file|selective_run_missing_file)
     if [[ ! -s "$MISSING_FILES_LIST" ]]; then
       echo "Missing file list is empty or does not exist: $MISSING_FILES_LIST" >&2
-      echo "Run: bash $0 missing" >&2
+      echo "Run: bash $0 missing-file" >&2
       exit 1
     fi
     mapfile -t RERUN_TARGETS < "$MISSING_FILES_LIST"
+    TOTAL_JOBS=${#RERUN_TARGETS[@]}
+    ;;
+  selective-run-missing-content|selective_run_missing_content)
+    if [[ ! -s "$MISSING_CONTENT_FILES_LIST" ]]; then
+      echo "Missing-content file list is empty or does not exist: $MISSING_CONTENT_FILES_LIST" >&2
+      echo "Run: bash $0 missing-content" >&2
+      exit 1
+    fi
+    mapfile -t RERUN_TARGETS < "$MISSING_CONTENT_FILES_LIST"
     TOTAL_JOBS=${#RERUN_TARGETS[@]}
     ;;
   run-from-scratch|run_from_scratch|run)
     ;;
   *)
     echo "Unknown mode: $MODE" >&2
-    echo "Valid modes: help, manifest, missing, selective-run, run-from-scratch" >&2
+    echo "Valid modes: help, manifest, missing-file, missing-content, selective-run-missing-file, selective-run-missing-content, run-from-scratch" >&2
     exit 1
     ;;
 esac
@@ -375,7 +467,9 @@ if command -v conda >/dev/null 2>&1; then
 fi
 conda activate focal_scaling
 
-if [[ "$MODE" == "selective-run" || "$MODE" == "selective_run" || "$MODE" == "selective" ]]; then
+if [[ "$MODE" == "selective-run" || "$MODE" == "selective_run" || "$MODE" == "selective" \
+   || "$MODE" == "selective-run-missing-file" || "$MODE" == "selective_run_missing_file" \
+   || "$MODE" == "selective-run-missing-content" || "$MODE" == "selective_run_missing_content" ]]; then
   parse_rerun_target "${RERUN_TARGETS[$SLURM_ARRAY_TASK_ID]}"
   run_eval "$SEED_IDX" "$MODEL_NAME" "$CORRUPTION" "$SEVERITY"
   exit 0
