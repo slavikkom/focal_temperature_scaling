@@ -23,7 +23,15 @@
 #SBATCH --cpus-per-task=4
 
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_NAME="$(basename "${BASH_SOURCE[0]}")"
+if [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/${SCRIPT_NAME}" ]]; then
+  SCRIPT_DIR="$SLURM_SUBMIT_DIR"
+elif [[ -n "${SLURM_SUBMIT_DIR:-}" && -f "${SLURM_SUBMIT_DIR}/evaluate_scripts/${SCRIPT_NAME}" ]]; then
+  SCRIPT_DIR="${SLURM_SUBMIT_DIR}/evaluate_scripts"
+else
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+fi
+SCRIPT_PATH="${SCRIPT_DIR}/${SCRIPT_NAME}"
 cd "$SCRIPT_DIR"
 
 MODE=${1:-help} # help, manifest, missing-file, missing-content, selective-run-*, or run-from-scratch
@@ -331,7 +339,7 @@ print_sbatch_command() {
   if [[ "$job_count" -gt 0 ]]; then
     echo "Array jobs needed: $job_count"
     echo "Submit with:"
-    echo "  sbatch --array=0-$((job_count - 1)) $0 $mode"
+    echo "  sbatch --array=0-$((job_count - 1)) $SCRIPT_PATH $mode"
   else
     echo "Array jobs needed: 0"
   fi
@@ -340,13 +348,13 @@ print_sbatch_command() {
 print_help() {
   cat <<EOF
 Usage:
-  bash $0 help
-  bash $0 manifest
-  bash $0 missing-file
-  bash $0 missing-content
-  sbatch --array=0-<N-1> $0 selective-run-missing-file
-  sbatch --array=0-<N-1> $0 selective-run-missing-content
-  sbatch --array=0-<N-1> $0 run-from-scratch
+  bash $SCRIPT_PATH help
+  bash $SCRIPT_PATH manifest
+  bash $SCRIPT_PATH missing-file
+  bash $SCRIPT_PATH missing-content
+  sbatch --array=0-<N-1> $SCRIPT_PATH selective-run-missing-file
+  sbatch --array=0-<N-1> $SCRIPT_PATH selective-run-missing-content
+  sbatch --array=0-<N-1> $SCRIPT_PATH run-from-scratch
 
 Modes:
   help                          Print this message. This is the default mode.
@@ -375,9 +383,9 @@ Current schedule:
 
 Suggested workflow:
   1. Edit the configuration variables in this script.
-  2. Run: bash $0 manifest
-  3. Run: bash $0 missing-file
-  4. Run: bash $0 missing-content
+  2. Run: bash $SCRIPT_PATH manifest
+  3. Run: bash $SCRIPT_PATH missing-file
+  4. Run: bash $SCRIPT_PATH missing-content
   5. Submit the selective-run command printed by the relevant missing mode.
 EOF
 }
@@ -418,7 +426,7 @@ case "$MODE" in
   selective-run|selective_run|selective|selective-run-missing-file|selective_run_missing_file)
     if [[ ! -s "$MISSING_FILES_LIST" ]]; then
       echo "Missing file list is empty or does not exist: $MISSING_FILES_LIST" >&2
-      echo "Run: bash $0 missing-file" >&2
+      echo "Run: bash $SCRIPT_PATH missing-file" >&2
       exit 1
     fi
     mapfile -t RERUN_TARGETS < "$MISSING_FILES_LIST"
@@ -427,7 +435,7 @@ case "$MODE" in
   selective-run-missing-content|selective_run_missing_content)
     if [[ ! -s "$MISSING_CONTENT_FILES_LIST" ]]; then
       echo "Missing-content file list is empty or does not exist: $MISSING_CONTENT_FILES_LIST" >&2
-      echo "Run: bash $0 missing-content" >&2
+      echo "Run: bash $SCRIPT_PATH missing-content" >&2
       exit 1
     fi
     mapfile -t RERUN_TARGETS < "$MISSING_CONTENT_FILES_LIST"
