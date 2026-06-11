@@ -51,7 +51,10 @@ python results_to_table2.py
 Creates an Excel workbook summarizing CIFAR-10-C corruption results. It scans
 CIFAR-10-C result files, selects the best variant in each loss family by
 validation log loss, aggregates metrics across seeds, and writes one summary
-sheet plus one sheet per corruption type. Currently, the results are only based on softmax link function.
+sheet plus one sheet per corruption type. By default, metrics are read from the
+softmax link, but another evaluated link function can be selected with
+`--metric-link-name`. To compare loss families using the best available
+evaluation link for each family, use `--best-performing-link-per-loss`.
 
 Expected corrupted-result layout:
 
@@ -83,6 +86,14 @@ bandwidth `0.05`, and Brier score. By default cells are formatted as
 `mean +/- std`; use `--separate-std-columns` to write mean and standard
 deviation into separate columns.
 
+Rows are selected by validation log loss within each loss family and
+calibration state. With `--best-performing-link-per-loss`, the selection also
+searches over every link function and link value available in the JSON files.
+This produces one row per loss family for each requested calibration mode:
+uncalibrated, temperature-calibrated, and Dirichlet-calibrated. The selected
+link name and value are written to `Selected Rows` and `Raw Results` when
+detail sheets are enabled.
+
 ### Arguments
 
 | Argument | Default | Description |
@@ -95,6 +106,9 @@ deviation into separate columns.
 | `--splits` | `train val test` | Dataset splits to include. Choices: `train`, `val`, `test`. |
 | `--calibrations` | `uncalibrated calibrated dirichlet` | Calibration states to include. Choices: `uncalibrated`, `calibrated`, `dirichlet`. |
 | `--cal-criteria` | `ce` | Temperature selection criterion. Choices: `ce`, `ece`. |
+| `--metric-link-name` | `softmax` | Link function to read metrics from in the result JSONs, for example `focal`, `focal_linear`, `exp_p`, `exp_1mp`, `one_minus_power`, or `log_power`. |
+| `--metric-link-value` | inferred | Fixed link parameter value to read. If omitted, `softmax` uses `1.0`; non-softmax links select the evaluated value with the lowest validation Logloss. |
+| `--best-performing-link-per-loss` | disabled | Search all available link functions and link values, then select the best validation-Logloss row per loss family and calibration state. Overrides `--metric-link-name` and `--metric-link-value` for metric collection. |
 | `--skip-detail-sheets` | disabled | Skip raw/detail sheets for faster export and smaller workbooks. |
 | `--separate-std-columns` | disabled | Write mean and std in separate columns instead of `mean +/- std` cells. |
 
@@ -130,6 +144,26 @@ python analysis_scripts/cifar10c_results_to_excel.py \
   --results-dir RESULTS/hpc_results_june26/CIFAR10C_epoch350_with_dirichlet \
   --splits test \
   --calibrations uncalibrated calibrated
+```
+
+Read metrics from an evaluated `exp_p` link instead of softmax, selecting the
+best `exp_p` value by validation Logloss:
+
+```bash
+python analysis_scripts/cifar10c_results_to_excel.py \
+  --results-dir RESULTS/hpc_results_june26/CIFAR10C_epoch350_with_dirichlet \
+  --metric-link-name exp_p \
+  --output analysis_scripts/CIFAR10C_results_exp_p.xlsx
+```
+
+Select the best available link function per loss family separately for
+uncalibrated, temperature-calibrated, and Dirichlet-calibrated rows:
+
+```bash
+python analysis_scripts/cifar10c_results_to_excel.py \
+  --results-dir RESULTS/hpc_results_june26/CIFAR10C_epoch350_with_dirichlet \
+  --best-performing-link-per-loss \
+  --output analysis_scripts/CIFAR10C_results_best_link_per_loss.xlsx
 ```
 
 Use ECE-selected temperatures and separate mean/std columns:

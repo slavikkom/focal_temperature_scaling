@@ -17,7 +17,7 @@ import argparse
 import json
 import math
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Iterable
 
@@ -44,7 +44,7 @@ class Approach:
     clean_file_name: str
     train_param: float | None
     metric_link_name: str = "softmax"
-    metric_link_value: float = 1.0
+    metric_link_value: float | None = 1.0
 
 
 APPROACH_PATTERNS = (
@@ -223,6 +223,35 @@ def parse_args() -> argparse.Namespace:
         help="Temperature selection criterion for calibrated metrics. Default: ce",
     )
     parser.add_argument(
+        "--metric-link-name",
+        default="softmax",
+        help=(
+            "Link function to read metrics from in each result JSON, for example "
+            "softmax, focal, focal_linear, exp_p, exp_1mp, one_minus_power, or "
+            "log_power. Default: softmax"
+        ),
+    )
+    parser.add_argument(
+        "--metric-link-value",
+        type=float,
+        default=None,
+        help=(
+            "Fixed link parameter value to read for --metric-link-name. If omitted, "
+            "softmax uses 1.0 for every loss; non-softmax links select the "
+            "evaluated value with the lowest validation Logloss."
+        ),
+    )
+    parser.add_argument(
+        "--best-performing-link-per-loss",
+        action="store_true",
+        help=(
+            "For each loss family and calibration state, select the best "
+            "available metric link function and link value by validation Logloss. "
+            "This overrides --metric-link-name and --metric-link-value for metric "
+            "collection."
+        ),
+    )
+    parser.add_argument(
         "--skip-detail-sheets",
         action="store_true",
         help="Skip Raw Results, Aggregated Numeric, and Selected Rows sheets for faster export.",
@@ -282,7 +311,24 @@ def discover_corruptions(results_dir: Path, severities: Iterable[int]) -> list[s
     return sorted(corruptions)
 
 
-def discover_approaches(results_dir: Path) -> list[Approach]:
+def approach_metric_link_value(
+    pattern: dict,
+    param: float | None,
+    metric_link_name: str,
+    metric_link_value: float | None,
+) -> float | None:
+    if metric_link_value is not None:
+        return metric_link_value
+    if metric_link_name == pattern["metric_link_name"]:
+        return float(pattern["metric_link_value"])
+    return None
+
+
+def discover_approaches(
+    results_dir: Path,
+    metric_link_name: str = "softmax",
+    metric_link_value: float | None = None,
+) -> list[Approach]:
     file_names = {path.name for path in results_dir.rglob("*.json")}
     approaches = []
 
@@ -310,8 +356,13 @@ def discover_approaches(results_dir: Path) -> list[Approach]:
                     file_name=file_name,
                     clean_file_name=clean_file_name,
                     train_param=param,
-                    metric_link_name=pattern["metric_link_name"],
-                    metric_link_value=pattern["metric_link_value"],
+                    metric_link_name=metric_link_name,
+                    metric_link_value=approach_metric_link_value(
+                        pattern,
+                        param,
+                        metric_link_name,
+                        metric_link_value,
+                    ),
                 )
             )
             break
@@ -330,6 +381,65 @@ def link_value_keys(value: float) -> list[str]:
     if float(value).is_integer():
         candidates.insert(0, str(int(value)))
     return list(dict.fromkeys(candidates))
+
+
+def parse_link_value_key(key: str) -> float | None:
+    try:
+        return float(key)
+    except ValueError:
+        return None
+
+
+def available_metric_link_names(
+    data: dict,
+    split: str,
+    calibration: str,
+    cal_criteria: str,
+) -> list[str]:
+    if calibration == "dirichlet":
+        return sorted(data.get("dirichlet_calibrated", {}).keys())
+    if calibration == "uncalibrated":
+        return sorted(data[split]["uncalibrated"].keys())
+    return sorted(data[split]["calibrated"][cal_criteria].keys())
+
+
+def available_metric_link_values(
+    data: dict,
+    approach: Approach,
+    split: str,
+    calibration: str,
+    cal_criteria: str,
+) -> list[tuple[str | None, float]]:
+    if calibration == "dirichlet":
+        value = approach.metric_link_value if approach.metric_link_value is not None else 1.0
+        return [(None, value)]
+
+    if calibration == "uncalibrated":
+        block = data[split]["uncalibrated"][approach.metric_link_name]
+    else:
+        block = data[split]["calibrated"][cal_criteria][approach.metric_link_name]
+
+    if approach.metric_link_value is not None:
+        for key in link_value_keys(approach.metric_link_value):
+            if key in block:
+                return [(key, approach.metric_link_value)]
+
+        available = ", ".join(block.keys())
+        raise KeyError(
+            f"Missing link value {approach.metric_link_value:g} "
+            f"for {approach.metric_link_name}; "
+            f"available values: {available}"
+        )
+
+    values = []
+    for key in block:
+        value = parse_link_value_key(key)
+        if value is not None:
+            values.append((key, value))
+    if not values:
+        raise KeyError(f"No numeric values found for link {approach.metric_link_name}.")
+
+    return sorted(values, key=lambda item: item[1])
 
 
 def ece_value(raw_value) -> float:
@@ -352,9 +462,22 @@ def calibration_label(calibration: str) -> str:
     return calibration
 
 
+def metric_link_label(
+    metric_link_name: str,
+    metric_link_value: float,
+    calibration: str,
+) -> str:
+    if calibration == "dirichlet":
+        return ""
+    if metric_link_name == "softmax" and metric_link_value == 1.0:
+        return ""
+    return f", {metric_link_name}={metric_link_value:g}"
+
+
 def get_optimal_temperature(
     data: dict,
     approach: Approach,
+    metric_link_value: float,
     calibration: str,
     cal_criteria: str,
 ) -> float:
@@ -364,30 +487,32 @@ def get_optimal_temperature(
         return np.nan
 
     values = data["T_dict"][approach.metric_link_name]
-    for key in link_value_keys(approach.metric_link_value):
+    for key in link_value_keys(metric_link_value):
         if key in values:
             return float(values[key][f" T_opt {cal_criteria}"])
 
     available = ", ".join(values.keys())
     raise KeyError(
-        f"Missing T_dict value {approach.metric_link_value:g} "
+        f"Missing T_dict value {metric_link_value:g} "
         f"for {approach.metric_link_name}; "
         f"available values: {available}"
     )
 
 
-def get_dirichlet_block(data: dict) -> dict:
-    return data["dirichlet_calibrated"]["softmax"]["full_odir"]
+def get_dirichlet_block(data: dict, metric_link_name: str = "softmax") -> dict:
+    return data["dirichlet_calibrated"][metric_link_name]["full_odir"]
 
 
-def get_dirichlet_parameters(data: dict) -> tuple[float, float]:
-    best = get_dirichlet_block(data)["best"]
+def get_dirichlet_parameters(data: dict, metric_link_name: str = "softmax") -> tuple[float, float]:
+    best = get_dirichlet_block(data, metric_link_name)["best"]
     return float(best["reg_lambda"]), float(best["reg_mu"])
 
 
 def get_metric_block(
     data: dict,
     approach: Approach,
+    metric_link_key: str | None,
+    metric_link_value: float,
     split: str,
     calibration: str,
     cal_criteria: str,
@@ -395,17 +520,20 @@ def get_metric_block(
     if calibration == "uncalibrated":
         block = data[split]["uncalibrated"][approach.metric_link_name]
     elif calibration == "dirichlet":
-        return get_dirichlet_block(data)[split]
+        return get_dirichlet_block(data, approach.metric_link_name)[split]
     else:
         block = data[split]["calibrated"][cal_criteria][approach.metric_link_name]
 
-    for key in link_value_keys(approach.metric_link_value):
+    if metric_link_key is not None and metric_link_key in block:
+        return block[metric_link_key]
+
+    for key in link_value_keys(metric_link_value):
         if key in block:
             return block[key]
 
     available = ", ".join(block.keys())
     raise KeyError(
-        f"Missing link value {approach.metric_link_value:g} "
+        f"Missing link value {metric_link_value:g} "
         f"for {approach.metric_link_name}; "
         f"available values: {available}"
     )
@@ -421,6 +549,7 @@ def collect_records(
     splits: list[str],
     calibrations: list[str],
     cal_criteria: str,
+    best_performing_link_per_loss: bool = False,
 ) -> tuple[pd.DataFrame, list[str]]:
     records = []
     warnings = []
@@ -461,69 +590,122 @@ def collect_records(
                         ):
                             continue
 
-                        try:
-                            temperature = get_optimal_temperature(
-                                data,
-                                approach=approach,
-                                calibration=calibration,
-                                cal_criteria=cal_criteria,
-                            )
-                            if calibration == "dirichlet":
-                                dirichlet_lambda, dirichlet_mu = get_dirichlet_parameters(data)
-                            else:
-                                dirichlet_lambda, dirichlet_mu = np.nan, np.nan
-                        except Exception as exc:
-                            warnings.append(
-                                f"Could not read calibration parameters from {path} "
-                                f"({calibration}): {exc}"
-                            )
-                            continue
-
                         for split in splits:
-                            try:
-                                metric_block = get_metric_block(
-                                    data,
-                                    approach=approach,
-                                    split=split,
-                                    calibration=calibration,
-                                    cal_criteria=cal_criteria,
-                                )
-                            except Exception as exc:
-                                warnings.append(
-                                    f"Could not read {path} "
-                                    f"({split}, {calibration}): {exc}"
-                                )
-                                continue
-
-                            row = {
-                                "approach": approach.approach,
-                                "approach_calibration": (
-                                    f"{approach.approach} ({calibration_label(calibration)})"
-                                ),
-                                "calibration": calibration,
-                                "split": split,
-                                "loss": approach.loss,
-                                "file_name": approach.file_name,
-                                "train_param": approach.train_param,
-                                "metric_link_name": approach.metric_link_name,
-                                "metric_link_value": approach.metric_link_value,
-                                "corruption": corruption,
-                                "severity": severity,
-                                "seed": seed,
-                                "Temperature": temperature,
-                                "Dirichlet lambda": dirichlet_lambda,
-                                "Dirichlet mu": dirichlet_mu,
-                            }
-                            for display_name, raw_name, scale, _ in METRICS:
-                                if raw_name not in metric_block:
-                                    row[display_name] = np.nan
+                            if best_performing_link_per_loss:
+                                try:
+                                    metric_link_names = available_metric_link_names(
+                                        data,
+                                        split=split,
+                                        calibration=calibration,
+                                        cal_criteria=cal_criteria,
+                                    )
+                                except Exception as exc:
+                                    warnings.append(
+                                        f"Could not read link names from {path} "
+                                        f"({split}, {calibration}): {exc}"
+                                    )
                                     continue
-                                if raw_name == "ECE":
-                                    value = ece_value(metric_block[raw_name])
-                                else:
-                                    value = float(metric_block[raw_name])
-                                row[display_name] = value * scale
-                            records.append(row)
+                            else:
+                                metric_link_names = [approach.metric_link_name]
+
+                            for metric_link_name in metric_link_names:
+                                candidate_approach = (
+                                    replace(
+                                        approach,
+                                        metric_link_name=metric_link_name,
+                                        metric_link_value=None,
+                                    )
+                                    if best_performing_link_per_loss
+                                    else approach
+                                )
+                                if calibration == "dirichlet":
+                                    candidate_approach = replace(
+                                        candidate_approach,
+                                        metric_link_value=1.0,
+                                    )
+
+                                try:
+                                    metric_link_values = available_metric_link_values(
+                                        data,
+                                        approach=candidate_approach,
+                                        split=split,
+                                        calibration=calibration,
+                                        cal_criteria=cal_criteria,
+                                    )
+                                except Exception as exc:
+                                    warnings.append(
+                                        f"Could not read link values from {path} "
+                                        f"({split}, {calibration}, {metric_link_name}): {exc}"
+                                    )
+                                    continue
+
+                                for metric_link_key, metric_link_value in metric_link_values:
+                                    try:
+                                        temperature = get_optimal_temperature(
+                                            data,
+                                            approach=candidate_approach,
+                                            metric_link_value=metric_link_value,
+                                            calibration=calibration,
+                                            cal_criteria=cal_criteria,
+                                        )
+                                        if calibration == "dirichlet":
+                                            dirichlet_lambda, dirichlet_mu = (
+                                                get_dirichlet_parameters(
+                                                    data,
+                                                    candidate_approach.metric_link_name,
+                                                )
+                                            )
+                                        else:
+                                            dirichlet_lambda, dirichlet_mu = np.nan, np.nan
+                                        metric_block = get_metric_block(
+                                            data,
+                                            approach=candidate_approach,
+                                            metric_link_key=metric_link_key,
+                                            metric_link_value=metric_link_value,
+                                            split=split,
+                                            calibration=calibration,
+                                            cal_criteria=cal_criteria,
+                                        )
+                                    except Exception as exc:
+                                        warnings.append(
+                                            f"Could not read {path} "
+                                            f"({split}, {calibration}, "
+                                            f"{candidate_approach.metric_link_name}={metric_link_value:g}): {exc}"
+                                        )
+                                        continue
+
+                                    row = {
+                                        "approach": approach.approach,
+                                        "approach_calibration": (
+                                            f"{approach.approach} ("
+                                            f"{calibration_label(calibration)}"
+                                            f"{metric_link_label(candidate_approach.metric_link_name, metric_link_value, calibration)}"
+                                            ")"
+                                        ),
+                                        "calibration": calibration,
+                                        "split": split,
+                                        "loss": approach.loss,
+                                        "file_name": approach.file_name,
+                                        "train_param": approach.train_param,
+                                        "metric_link_name": candidate_approach.metric_link_name,
+                                        "metric_link_value": metric_link_value,
+                                        "corruption": corruption,
+                                        "severity": severity,
+                                        "seed": seed,
+                                        "Temperature": temperature,
+                                        "Dirichlet lambda": dirichlet_lambda,
+                                        "Dirichlet mu": dirichlet_mu,
+                                    }
+                                    for display_name, raw_name, scale, _ in METRICS:
+                                        if raw_name not in metric_block:
+                                            row[display_name] = np.nan
+                                            continue
+                                        if raw_name == "ECE":
+                                            value = ece_value(metric_block[raw_name])
+                                        else:
+                                            value = float(metric_block[raw_name])
+                                        row[display_name] = value * scale
+                                    records.append(row)
 
     return pd.DataFrame(records), warnings
 
@@ -538,7 +720,16 @@ def select_best_validation_logloss(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, 
     val_df = raw_df[raw_df["split"] == "val"].copy()
     val_df["selection_loss"] = val_df["loss"].map(selection_loss_name)
     val_df = val_df.drop_duplicates(
-        ["selection_loss", "calibration", "approach", "approach_calibration", "file_name", "seed"]
+        [
+            "selection_loss",
+            "calibration",
+            "approach",
+            "approach_calibration",
+            "file_name",
+            "metric_link_name",
+            "metric_link_value",
+            "seed",
+        ]
     )
 
     candidates = (
@@ -549,6 +740,8 @@ def select_best_validation_logloss(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, 
                 "approach",
                 "approach_calibration",
                 "file_name",
+                "metric_link_name",
+                "metric_link_value",
             ],
             sort=False,
         )["Logloss"]
@@ -562,8 +755,8 @@ def select_best_validation_logloss(raw_df: pd.DataFrame) -> tuple[pd.DataFrame, 
 
     selected_df = pd.DataFrame(selected_rows).reset_index(drop=True)
     filtered_df = raw_df.merge(
-        selected_df[["approach", "calibration"]],
-        on=["approach", "calibration"],
+        selected_df[["approach", "calibration", "metric_link_name", "metric_link_value"]],
+        on=["approach", "calibration", "metric_link_name", "metric_link_value"],
         how="inner",
     )
 
@@ -1081,13 +1274,33 @@ def write_workbook(
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+        if args.best_performing_link_per_loss:
+            metric_link_note = (
+                "Metrics are read from the best available link function and link "
+                "value per loss family and calibration state, selected by lowest "
+                "validation Logloss."
+            )
+        elif args.metric_link_value is None:
+            if args.metric_link_name == "softmax":
+                metric_link_note = "Metrics are read from softmax with link value 1.0."
+            else:
+                metric_link_note = (
+                    f"Metrics are read from link '{args.metric_link_name}'. "
+                    "The link value is selected by lowest validation Logloss."
+                )
+        else:
+            metric_link_note = (
+                f"Metrics are read from link '{args.metric_link_name}' "
+                f"with fixed value {args.metric_link_value:g}."
+            )
         summary_note = (
             "Values are mean +/- std across corruption-level means. "
             "smECE sigma is the adaptive bandwidth selected for smECE; "
             "smECE 0.05 uses the fixed bandwidth. "
             "Train and validation are shown in separate columns; severity columns show test only. "
             "Rows are selected by lowest validation Logloss within each loss family and calibration state. "
-            "Calibrated rows use CE-selected temperature scaling. "
+            f"Calibrated rows use {args.cal_criteria.upper()}-selected temperature scaling. "
+            f"{metric_link_note} "
             "Dirichlet rows use softmax full ODIR with selected lambda and mu."
         )
         corruption_note = (
@@ -1096,7 +1309,8 @@ def write_workbook(
             "smECE 0.05 uses the fixed bandwidth. "
             "Train and validation are shown in separate columns; severity columns show test only. "
             "Rows are selected by lowest validation Logloss within each loss family and calibration state. "
-            "Calibrated rows use CE-selected temperature scaling. "
+            f"Calibrated rows use {args.cal_criteria.upper()}-selected temperature scaling. "
+            f"{metric_link_note} "
             "Dirichlet rows use softmax full ODIR with selected lambda and mu."
         )
         summary_tables = [
@@ -1172,7 +1386,11 @@ def main() -> None:
     severities = sorted(args.severities)
     seeds = sorted(args.seeds)
     corruptions = discover_corruptions(results_dir, severities)
-    approaches = discover_approaches(results_dir)
+    approaches = discover_approaches(
+        results_dir,
+        metric_link_name=args.metric_link_name,
+        metric_link_value=args.metric_link_value,
+    )
 
     if not corruptions:
         raise RuntimeError(f"No CIFAR-10-C corruption directories found in {results_dir}")
@@ -1191,6 +1409,7 @@ def main() -> None:
         splits=["val"],
         calibrations=args.calibrations,
         cal_criteria=args.cal_criteria,
+        best_performing_link_per_loss=args.best_performing_link_per_loss,
     )
     if selection_raw_df.empty:
         raise RuntimeError("No readable validation records were found for parameter selection.")
@@ -1211,10 +1430,11 @@ def main() -> None:
         splits=args.splits,
         calibrations=args.calibrations,
         cal_criteria=args.cal_criteria,
+        best_performing_link_per_loss=args.best_performing_link_per_loss,
     )
     raw_df = raw_df.merge(
-        selected_df[["approach", "calibration"]],
-        on=["approach", "calibration"],
+        selected_df[["approach", "calibration", "metric_link_name", "metric_link_value"]],
+        on=["approach", "calibration", "metric_link_name", "metric_link_value"],
         how="inner",
     )
     warnings = selection_warnings + final_warnings
@@ -1237,6 +1457,15 @@ def main() -> None:
     )
 
     print(f"Wrote {output_path}")
+    if args.best_performing_link_per_loss:
+        print("Metric link: best available per loss family/calibration (validation Logloss)")
+    elif args.metric_link_value is None:
+        if args.metric_link_name == "softmax":
+            print(f"Metric link: {args.metric_link_name} (value 1.0)")
+        else:
+            print(f"Metric link: {args.metric_link_name} (selected by validation Logloss)")
+    else:
+        print(f"Metric link: {args.metric_link_name} ({args.metric_link_value:g})")
     print(f"Approaches: {', '.join(approach.approach for approach in approaches)}")
     print(f"Selected rows: {len(selected_df)}")
     print(f"Corruptions: {len(corruptions)}")
