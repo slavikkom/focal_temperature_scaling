@@ -124,7 +124,8 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
                                      num_classes=10, device='cuda',
                                      train_logits=None, train_labels=None,
                                      reg_grid=None, cv_folds=3, max_iter=1024,
-                                     n_jobs=1, seed=1, smoke_test=False):
+                                     n_jobs=1, seed=1, smoke_test=False,
+                                     return_probabilities=False):
     if reg_grid is None:
         reg_grid = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
@@ -214,18 +215,26 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
     test_cal_probs = _probs_to_tensor(estimator.predict_proba(test_probs_cv), device)
     result["val"] = evaluate(val_labels, val_cal_probs, num_classes=num_classes)
     result["test"] = evaluate(test_labels, test_cal_probs, num_classes=num_classes)
+    probabilities = {
+        "val": val_cal_probs,
+        "test": test_cal_probs,
+    }
 
     if train_logits is not None and train_labels is not None:
         train_probs = get_probs(train_logits, T=1, a=1, link='softmax')
         train_probs_cv = _to_numpy_array(train_probs)
         train_cal_probs = _probs_to_tensor(estimator.predict_proba(train_probs_cv), device)
         result["train"] = evaluate(train_labels, train_cal_probs, num_classes=num_classes)
+        probabilities["train"] = train_cal_probs
 
-    return {
+    stats = {
         "softmax": {
             "full_odir": result,
         }
     }
+    if return_probabilities:
+        return stats, probabilities
+    return stats
 
 def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None, links=None):
     if links is None or "all" in links:

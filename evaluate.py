@@ -170,10 +170,295 @@ def parseArgs():
         help="Save validation logits, labels, and indices to file.")
     parser.add_argument("--save-test-logits", action="store_true", dest="save_test_logits",
         help="Save test logits, labels, and indices to file.")
+    parser.add_argument("--save-probs", action="store_true", dest="save_probs",
+        help=(
+            "Save train/val/test probabilities for the selected --links. Alias for "
+            "--save-train-probs --save-val-probs --save-test-probs. "
+            "For each link, save the uncalibrated and CE-selected temperature-scaled probabilities. "
+            "If --dirichlet is set, also save softmax+dirichlet probabilities."
+        ))
+    parser.set_defaults(save_probs=False)
+    parser.add_argument("--save-train-probs", action="store_true", dest="save_train_probs",
+        help="Save train probabilities for the selected --links and optional --dirichlet calibration.")
+    parser.add_argument("--save-val-probs", action="store_true", dest="save_val_probs",
+        help="Save validation probabilities for the selected --links and optional --dirichlet calibration.")
+    parser.add_argument("--save-test-probs", action="store_true", dest="save_test_probs",
+        help="Save test probabilities for the selected --links and optional --dirichlet calibration.")
     parser.add_argument("--json-precision", type=int, default=5, dest="json_precision",
         help="Number of decimal places to keep for floating point values saved to JSON.")
 
     return parser.parse_args()
+
+
+LINK_ALIASES = {
+    "exp1mp": "exp_1mp",
+    "exp_1mp": "exp_1mp",
+    "expon1mp": "exp_1mp",
+    "exp_on_1mp": "exp_1mp",
+    "exponp": "exp_p",
+    "exp_p": "exp_p",
+    "exp_on_p": "exp_p",
+}
+
+LINK_DISPLAY_NAMES = {
+    "softmax": "softmax",
+    "focal": "focal",
+    "focal_linear": "focal_linear",
+    "exp_p": "exponp",
+    "exp_1mp": "exp1mp",
+    "one_minus_power": "one_minus_power",
+    "generalized_focal": "generalized_focal",
+    "log_power": "log_power",
+}
+
+
+def normalize_links(links):
+    if links is None:
+        return None
+
+    normalized = []
+    for link in links:
+        link_key = link.strip().lower().replace("-", "_")
+        link_key = LINK_ALIASES.get(link_key, link_key)
+        if link_key == "all":
+            return ["all"]
+        if link_key not in link_dict:
+            raise ValueError(
+                "Unknown calibration link '{}'. Valid links are: {}".format(
+                    link, ", ".join(link_dict.keys())
+                )
+            )
+        if link_key not in normalized:
+            normalized.append(link_key)
+    return normalized
+
+
+def get_active_link_dict(links):
+    if links is None or "all" in links:
+        return link_dict
+    return {link: link_dict[link] for link in links}
+
+
+def get_probability_export_splits(args):
+    if args.save_probs:
+        return ["train", "val", "test"]
+
+    splits = []
+    if args.save_train_probs:
+        splits.append("train")
+    if args.save_val_probs:
+        splits.append("val")
+    if args.save_test_probs:
+        splits.append("test")
+    return splits
+
+
+def link_value_to_key(link_value):
+    if isinstance(link_value, tuple):
+        return "_".join(str(round(v, 2)) for v in link_value)
+    return str(round(link_value, 2))
+
+
+def key_to_filename_token(key):
+    return key.replace("_", "-")
+
+
+def format_number_for_filename(value):
+    value = float(value)
+    text = "{:.4f}".format(value).rstrip("0").rstrip(".")
+    return text if text else "0"
+
+
+def method_name_for_link(link_name, temperature_scaled=False):
+    display_name = LINK_DISPLAY_NAMES.get(link_name, link_name)
+    if link_name == "softmax":
+        method_name = "softmax"
+    else:
+        method_name = "softmax+{}".format(display_name)
+    if temperature_scaled:
+        method_name += "+ts"
+    return method_name
+
+
+def best_link_value_by_val_ce(stats, active_link_dict, link_name, temperature_scaled=False):
+    state_stats = stats["val"]["calibrated"]["ce"] if temperature_scaled else stats["val"]["uncalibrated"]
+    link_stats = state_stats[link_name]
+    best_key = None
+    best_ce = None
+    for key, metrics in link_stats.items():
+        ce = metrics["CE"]
+        if best_ce is None or ce < best_ce:
+            best_ce = ce
+            best_key = key
+
+    key_to_value = {
+        link_value_to_key(link_value): link_value
+        for link_value in active_link_dict[link_name]
+    }
+    if best_key not in key_to_value:
+        raise ValueError(
+            "Could not map selected key '{}' back to a parameter value for link '{}'.".format(
+                best_key, link_name
+            )
+        )
+
+    return best_key, key_to_value[best_key], best_ce
+
+
+def probability_export_specs_from_stats(stats, active_link_dict, include_dirichlet=False):
+    specs = []
+    for link_name in active_link_dict:
+        best_key, best_link_value, best_ce = best_link_value_by_val_ce(
+            stats, active_link_dict, link_name, temperature_scaled=False)
+        method_name = method_name_for_link(link_name, temperature_scaled=False)
+        suffix = "" if link_name == "softmax" else "_{}".format(key_to_filename_token(best_key))
+        specs.append({
+            "method_name": method_name,
+            "filename_suffix": suffix,
+            "link_name": link_name,
+            "link_value": best_link_value,
+            "temperature": 1,
+            "temperature_metric": "none",
+            "val_ce": best_ce,
+            "calibrated_on": "none",
+        })
+
+        best_key, best_link_value, best_ce = best_link_value_by_val_ce(
+            stats, active_link_dict, link_name, temperature_scaled=True)
+        temperature = stats["T_dict"][link_name][best_key][" T_opt ce"]
+        method_name = method_name_for_link(link_name, temperature_scaled=True)
+        if link_name == "softmax":
+            suffix_parts = [format_number_for_filename(temperature)]
+        else:
+            suffix_parts = [
+                key_to_filename_token(best_key),
+                format_number_for_filename(temperature),
+            ]
+        specs.append({
+            "method_name": method_name,
+            "filename_suffix": "_{}".format("+".join(suffix_parts)),
+            "link_name": link_name,
+            "link_value": best_link_value,
+            "temperature": temperature,
+            "temperature_metric": "ce",
+            "val_ce": best_ce,
+            "calibrated_on": "val",
+        })
+
+    if include_dirichlet:
+        specs.append({
+            "method_name": "softmax+dirichlet",
+            "filename_suffix": "",
+            "link_name": "softmax",
+            "link_value": 1,
+            "temperature": 1,
+            "temperature_metric": "none",
+            "val_ce": None,
+            "calibrated_on": "val",
+            "dirichlet": True,
+        })
+    return specs
+
+
+def log_probability_export_specs(specs):
+    print("Probability exports selected by --links/--dirichlet:")
+    for spec in specs:
+        detail = spec["method_name"] + spec["filename_suffix"]
+        if spec.get("val_ce") is not None:
+            detail += " (val CE {:.5f})".format(spec["val_ce"])
+        print("  {}".format(detail))
+
+
+def to_numpy(values):
+    if torch.is_tensor(values):
+        return values.detach().cpu().numpy()
+    return np.asarray(values)
+
+
+def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
+    logits = to_numpy(logits)
+    labels = to_numpy(labels)
+    if indices is None:
+        indices = np.arange(len(labels))
+    np.savez(filename, logits=logits, labels=labels, indices=indices)
+
+
+def save_probs_labels_indices_npz(filename, probs, labels, indices=None, metadata=None):
+    probs = to_numpy(probs)
+    labels = to_numpy(labels)
+    if indices is None:
+        indices = np.arange(len(labels))
+
+    arrays = {
+        "probs": probs,
+        "labels": labels,
+        "indices": indices,
+    }
+    if metadata is not None:
+        for key, value in metadata.items():
+            arrays[key] = np.asarray(value)
+    np.savez(filename, **arrays)
+
+
+def save_probability_exports(save_eval_loc, split_logits, split_labels, specs,
+                             dirichlet_probabilities=None):
+    with torch.inference_mode():
+        for spec in specs:
+            metadata = {
+                "method": spec["method_name"],
+                "link": spec["link_name"],
+                "link_value": spec["link_value"],
+                "temperature": float(spec["temperature"]),
+                "temperature_metric": spec["temperature_metric"],
+                "calibrated_on": spec["calibrated_on"],
+                "selection_metric": "val_ce",
+            }
+            if spec.get("val_ce") is not None:
+                metadata["val_ce"] = float(spec["val_ce"])
+
+            if spec.get("dirichlet"):
+                if dirichlet_probabilities is None:
+                    raise ValueError(
+                        "Dirichlet probabilities were requested but were not computed."
+                    )
+                for split_name, labels in split_labels.items():
+                    if split_name not in dirichlet_probabilities:
+                        continue
+                    filename = os.path.join(
+                        save_eval_loc,
+                        "{}_probs_{}{}.npz".format(
+                            split_name, spec["method_name"], spec["filename_suffix"]
+                        ),
+                    )
+                    save_probs_labels_indices_npz(
+                        filename,
+                        dirichlet_probabilities[split_name],
+                        labels,
+                        metadata=metadata,
+                    )
+                    print("Saved probabilities: {}".format(filename))
+                continue
+
+            for split_name, logits in split_logits.items():
+                filename = os.path.join(
+                    save_eval_loc,
+                    "{}_probs_{}{}.npz".format(
+                        split_name, spec["method_name"], spec["filename_suffix"]
+                    ),
+                )
+                probs = get_probs(
+                    logits,
+                    T=spec["temperature"],
+                    a=spec["link_value"],
+                    link=spec["link_name"],
+                )
+                save_probs_labels_indices_npz(
+                    filename,
+                    probs,
+                    split_labels[split_name],
+                    metadata=metadata,
+                )
+                print("Saved probabilities: {}".format(filename))
 
 def round_floats_for_json(obj, precision=5):
     if isinstance(obj, float):
@@ -285,6 +570,10 @@ if __name__ == "__main__":
         cuda = True
 
     args = parseArgs()
+    args.links = normalize_links(args.links)
+    active_link_dict = get_active_link_dict(args.links)
+    probability_export_splits = get_probability_export_splits(args)
+    save_any_probs = len(probability_export_splits) > 0
 
     # Setting additional parameters
     set_seed(args.seed)
@@ -466,8 +755,10 @@ if __name__ == "__main__":
                                           train_logits=train_logits,
                                           train_labels=train_labels,
                                           links=args.links)
-    if args.dirichlet:
-        stats["dirichlet_calibrated"] = dirichlet_calibration_evaluation(
+    dirichlet_probabilities = None
+    needs_dirichlet_probabilities = save_any_probs and args.dirichlet
+    if args.dirichlet or needs_dirichlet_probabilities:
+        dirichlet_result = dirichlet_calibration_evaluation(
             val_logits, val_labels, test_logits, test_labels,
             num_classes=num_classes, device=device,
             train_logits=train_logits,
@@ -477,16 +768,14 @@ if __name__ == "__main__":
             max_iter=args.dirichlet_max_iter,
             n_jobs=args.dirichlet_n_jobs,
             seed=args.seed,
-            smoke_test=args.smoke_test)
+            smoke_test=args.smoke_test,
+            return_probabilities=needs_dirichlet_probabilities)
+        if needs_dirichlet_probabilities:
+            dirichlet_stats, dirichlet_probabilities = dirichlet_result
+        else:
+            dirichlet_stats = dirichlet_result
+        stats["dirichlet_calibrated"] = dirichlet_stats
     # stats = round_floats(stats)
-
-    def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
-        import numpy as np
-        logits = logits.cpu().numpy() if hasattr(logits, 'cpu') else logits
-        labels = labels.cpu().numpy() if hasattr(labels, 'cpu') else labels
-        if indices is None:
-            indices = np.arange(len(labels))
-        np.savez(filename, logits=logits, labels=labels, indices=indices)
 
     # Ensure the save directory exists
     if not os.path.exists(args.save_eval_loc):
@@ -509,6 +798,38 @@ if __name__ == "__main__":
         save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'val_logits_labels_indices.npz'), val_logits, val_labels)
     if args.save_test_logits:
         save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'test_logits_labels_indices.npz'), test_logits, test_labels)
+    if save_any_probs:
+        probability_export_specs = probability_export_specs_from_stats(
+            stats,
+            active_link_dict,
+            include_dirichlet=args.dirichlet,
+        )
+        log_probability_export_specs(probability_export_specs)
+        all_split_logits = {
+            "train": train_logits,
+            "val": val_logits,
+            "test": test_logits,
+        }
+        all_split_labels = {
+            "train": train_labels,
+            "val": val_labels,
+            "test": test_labels,
+        }
+        split_logits = {
+            split: all_split_logits[split]
+            for split in probability_export_splits
+        }
+        split_labels = {
+            split: all_split_labels[split]
+            for split in probability_export_splits
+        }
+        save_probability_exports(
+            args.save_eval_loc,
+            split_logits,
+            split_labels,
+            probability_export_specs,
+            dirichlet_probabilities=dirichlet_probabilities,
+        )
 
     res_str += '&{:.4f}({:.2f})&{:.4f}&{:.4f}&{:.4f}'.format(nll,  T_opt,  ece,  adaece, cece)
 
