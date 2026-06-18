@@ -1,10 +1,11 @@
 # Analysis Scripts
 
-This directory contains scripts for turning experiment JSON files into paper
-tables and Excel workbooks. The two main scripts are:
+This directory contains scripts for turning experiment outputs into paper
+tables, Excel workbooks, and diagnostic visualizations. The main scripts are:
 
 - `results_to_table2.py`
 - `cifar10c_results_to_excel.py`
+- `analyze_logits_probs.py`
 
 ## `results_to_table2.py`
 
@@ -174,4 +175,119 @@ python analysis_scripts/cifar10c_results_to_excel.py \
   --cal-criteria ece \
   --separate-std-columns \
   --output analysis_scripts/CIFAR10C_results_separate_mean_std.xlsx
+```
+
+## `analyze_logits_probs.py`
+
+Loads saved logits and saved probability exports for one seed/run, then writes
+simplex visualizations of rank-window probability geometry and calibration-map
+behavior.
+
+### Inputs
+
+The script expects an input directory containing split-level `.npz` files
+created by `evaluate.py` probability/logit export options.
+
+Logit files are optional but, when present, should be named:
+
+```text
+train_logits_labels_indices.npz
+val_logits_labels_indices.npz
+test_logits_labels_indices.npz
+```
+
+Each logit file should contain:
+
+- `logits`: array of shape `(n_examples, n_classes)`.
+- `labels`: class labels.
+- `indices`: optional original example indices.
+
+Probability files are also optional but, when present, should be named:
+
+```text
+train_probs_<method>.npz
+val_probs_<method>.npz
+test_probs_<method>.npz
+```
+
+Each probability file should contain:
+
+- `probs`: array of shape `(n_examples, n_classes)`.
+- `labels`: class labels.
+- `indices`: optional original example indices.
+- optional metadata such as `method`, `link`, `link_value`, `temperature`,
+  `temperature_metric`, `calibrated_on`, and `val_ce`.
+
+The metadata is used to reconstruct calibration-map displacement plots for
+softmax, temperature scaling, focal links, and the links implemented in
+`new_links.py`. Dirichlet probability files currently save final probabilities
+but not the learned Dirichlet matrix/bias, so Dirichlet map displacement is
+shown as unavailable.
+
+### Outputs
+
+The script writes figures to `--output-dir`.
+
+Current outputs include:
+
+- `logits_simplex_density_grid_<rank-window>.png`: train/val/test density of
+  top-rank logit softmax triples.
+- `simplex_density_grid_<rank-window>.png`: one row per probability method.
+  The first columns show train/val/test rank-window densities. The fourth
+  column shows calibration-map displacement in ordered-sector-expanded
+  coordinates. The fifth column shows the same calibration map in raw simplex
+  coordinates as a reference.
+- `simplex_density_drift_<rank-window>.png`: density differences between
+  splits, currently `val - train` and `test - val`, for the first selected
+  probability method.
+- `calibration_map_displacement_<method>.png`: one standalone raw-coordinate
+  calibration-map displacement plot for each selected probability method.
+- `link_barycentric_fields.png`, `link_slice.png`, and `link_displacement.png`:
+  additional link-shape plots for the first selected non-softmax method.
+
+Rank windows are controlled by `--topk-offset`. For example, `--topk-offset 0`
+plots ranks 1-3, `--topk-offset 2` plots ranks 3-5, and `--topk-offset 3`
+plots ranks 4-6.
+
+For rank-window plots, sorted triples such as ranks 3-5 satisfy
+`p_rank3 >= p_rank4 >= p_rank5`, so they naturally occupy only one sector of
+the simplex. The script expands this ordered sector to the full triangle for
+the density views and labels the plot with `ordered sector expanded`. The mean
+annotation still reports the original, unexpanded rank probabilities.
+
+### Examples
+
+Analyze a CIFAR-10 seed directory with saved logits and probabilities:
+
+```bash
+python analysis_scripts/analyze_logits_probs.py \
+  --input-dir RESULTS/CIFAR10_LOGITSLABELSPROBS/42 \
+  --output-dir analysis_scripts/logit_prob_visualizations_cifar10_42 \
+  --topk-offset 2 \
+  --bins 35
+```
+
+Plot only selected probability methods:
+
+```bash
+python analysis_scripts/analyze_logits_probs.py \
+  --input-dir RESULTS/CIFAR10_LOGITSLABELSPROBS/42 \
+  --output-dir analysis_scripts/logit_prob_visualizations_cifar10_42 \
+  --topk-offset 2 \
+  --methods softmax softmax+ts_2.55 softmax+exp1mp+ts_2+1.9
+```
+
+Analyze a logits-only export directory:
+
+```bash
+python analysis_scripts/analyze_logits_probs.py \
+  --input-dir RESULTS/CIFAR10_LOGITSLABELS/42 \
+  --output-dir analysis_scripts/logit_prob_visualizations_cifar10_42 \
+  --topk-offset 3
+```
+
+Use the default input/output paths defined in the script:
+
+```bash
+python analysis_scripts/analyze_logits_probs.py
 ```
