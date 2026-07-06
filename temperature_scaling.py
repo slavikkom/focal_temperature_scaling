@@ -161,7 +161,7 @@ class ModelWithTemperature(nn.Module):
         ece_criterion = AdaptiveECELoss().to(device)
 
         # Calculate NLL and ECE before temperature scaling
-        print("Current parameter is ", self.a)
+        print("Current link parameter is ", self.a)
         probs = apply_link(logits, link=self.link, a=self.a)
         
         before_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()

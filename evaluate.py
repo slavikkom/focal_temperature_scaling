@@ -193,6 +193,12 @@ def parseArgs():
         help="Save test probabilities for the selected --links and optional --dirichlet calibration.")
     parser.add_argument("--json-precision", type=int, default=5, dest="json_precision",
         help="Number of decimal places to keep for floating point values saved to JSON.")
+    parser.add_argument("--train-smece-sample-size", type=int, default=5000,
+        dest="train_smooth_ece_sample_size",
+        help=(
+            "Number of train examples to use when estimating smECE and smECE_0.05. "
+            "Use 0 or a negative value to evaluate the full train set."
+        ))
 
     return parser.parse_args()
 
@@ -641,14 +647,19 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
     if net is None:
         net = nn.Identity().to(device)
 
+    print("ready to run focal calibration evaluation...")
+    train_smooth_ece_sample_size = getattr(args, "train_smooth_ece_sample_size", 5000)
     stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
                                           num_classes=num_classes, device=device,
                                           train_logits=train_logits,
                                           train_labels=train_labels,
-                                          links=args.links)
+                                          links=args.links,
+                                          train_smooth_ece_sample_size=train_smooth_ece_sample_size,
+                                          seed=args.seed)
     dirichlet_probabilities = None
     needs_dirichlet_probabilities = save_any_probs and args.dirichlet
     if args.dirichlet or needs_dirichlet_probabilities:
+        print("ready to run Dirichlet calibration evaluation...")
         dirichlet_result = dirichlet_calibration_evaluation(
             val_logits, val_labels, test_logits, test_labels,
             num_classes=num_classes, device=device,
@@ -660,6 +671,7 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
             n_jobs=args.dirichlet_n_jobs,
             seed=args.seed,
             smoke_test=args.smoke_test,
+            train_smooth_ece_sample_size=train_smooth_ece_sample_size,
             return_probabilities=needs_dirichlet_probabilities)
         if needs_dirichlet_probabilities:
             dirichlet_stats, dirichlet_probabilities = dirichlet_result

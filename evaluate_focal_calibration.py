@@ -21,17 +21,34 @@ link_dict = {
 }
 
 def multi_acc(y_pred, y_test):
-    y_pred = torch.argmax(y_pred, dim = 1)    
-    
-    correct_pred = (y_pred == y_test).float()
-    acc = correct_pred.sum() / len(correct_pred)
-    
-    acc = acc.cpu().numpy() * 100
-    
-    return acc
+    # y_pred = torch.argmax(y_pred, dim = 1)    
+    # correct_pred = (y_pred == y_test).float()
+    # acc = correct_pred.sum() / len(correct_pred)
+    # acc = acc.cpu().numpy() * 100
+    # return acc
+    return (y_pred.argmax(dim=1).eq(y_test).float().mean() * 100).item()
 
 
-def evaluate(y_true, probs, num_classes=10):
+def brier_score(probs, labels, num_classes):
+    labels = labels.long()
+    true_probs = probs.gather(1, labels[:, None]).squeeze(1)
+    squared_error_sum = probs.pow(2).sum(dim=1) - 2 * true_probs + 1
+    return (squared_error_sum / num_classes).mean().item()
+
+
+def _sample_metric_inputs(y_true, probs, sample_size=None, seed=1):
+    if sample_size is None or sample_size <= 0 or y_true.numel() <= sample_size:
+        return y_true, probs
+
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    indices = torch.randperm(y_true.numel(), generator=generator)[:sample_size]
+    indices = indices.to(device=y_true.device)
+    return y_true[indices], probs[indices]
+
+
+def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
+             smooth_ece_sample_seed=1):
     
     epoch_loss = {}
         
@@ -45,12 +62,22 @@ def evaluate(y_true, probs, num_classes=10):
         
     epoch_loss['CE'] = log_loss_criterion(torch.log(probs), y_true.long()).item()
     epoch_loss['ECE'] = calibration_criterion(probs, y_true.long())
-    sm_ece, sm_ece_sigma = smooth_calibration_criterion(probs, y_true.long())
+    smooth_y_true, smooth_probs = _sample_metric_inputs(
+        y_true,
+        probs,
+        sample_size=smooth_ece_sample_size,
+        seed=smooth_ece_sample_seed,
+    )
+    smooth_y_true = smooth_y_true.long()
+    sm_ece, sm_ece_sigma = smooth_calibration_criterion(smooth_probs, smooth_y_true)
     epoch_loss['smECE'] = sm_ece.item()
     epoch_loss['smECE_sigma'] = sm_ece_sigma
-    epoch_loss['smECE_0.05'] = fixed_smooth_calibration_criterion(probs, y_true.long()).item()
+    epoch_loss['smECE_num_samples'] = int(smooth_y_true.numel())
+    epoch_loss['smECE_0.05'] = fixed_smooth_calibration_criterion(smooth_probs, smooth_y_true).item()
+    epoch_loss['smECE_0.05_num_samples'] = int(smooth_y_true.numel())
         
-    epoch_loss['Brier'] = mse_loss(probs, torch.nn.functional.one_hot(y_true.long(), num_classes=num_classes).float()).item()
+    # epoch_loss['Brier'] = mse_loss(probs, torch.nn.functional.one_hot(y_true.long(), num_classes=num_classes).float()).item()
+    epoch_loss['Brier'] = brier_score(probs, y_true, num_classes)
     epoch_loss['ACC'] = multi_acc(probs, y_true)
 
     return epoch_loss
@@ -125,7 +152,8 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
                                      train_logits=None, train_labels=None,
                                      reg_grid=None, cv_folds=3, max_iter=1024,
                                      n_jobs=1, seed=1, smoke_test=False,
-                                     return_probabilities=False):
+                                     return_probabilities=False,
+                                     train_smooth_ece_sample_size=5000):
     if reg_grid is None:
         reg_grid = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
@@ -224,7 +252,13 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
         train_probs = get_probs(train_logits, T=1, a=1, link='softmax')
         train_probs_cv = _to_numpy_array(train_probs)
         train_cal_probs = _probs_to_tensor(estimator.predict_proba(train_probs_cv), device)
-        result["train"] = evaluate(train_labels, train_cal_probs, num_classes=num_classes)
+        result["train"] = evaluate(
+            train_labels,
+            train_cal_probs,
+            num_classes=num_classes,
+            smooth_ece_sample_size=train_smooth_ece_sample_size,
+            smooth_ece_sample_seed=seed,
+        )
         probabilities["train"] = train_cal_probs
 
     stats = {
@@ -236,7 +270,11 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
         return stats, probabilities
     return stats
 
-def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels, num_classes=10, device='cuda', train_logits=None, train_labels=None, links=None):
+def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
+                                 num_classes=10, device='cuda', train_logits=None,
+                                 train_labels=None, links=None,
+                                 train_smooth_ece_sample_size=5000,
+                                 seed=1):
     if links is None or "all" in links:
         active_link_dict = link_dict
     else:
@@ -282,7 +320,7 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
 
     for link_name in active_link_dict:
         for link_value in active_link_dict[link_name]:
-
+            print(">>> Running posthoc calibration for link={} value={}".format(link_name, link_value))
             if isinstance(link_value, tuple):
                 # Round each element, then join with underscore
                 key = "_".join(str(round(v, 2)) for v in link_value)
@@ -293,6 +331,7 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
             scaled_model.set_temperature(val_logits, val_labels, cross_validate='ece', device=device)
             T_opt_ce = scaled_model.get_temperature(metric='ce')
             T_opt_ece = scaled_model.get_temperature(metric='ece')
+            print("Optimal temperature found: T_opt_ce = {:.3f}, T_opt_ece = {:.3f}".format(T_opt_ce, T_opt_ece))
             
             gamma_dict[link_name][key]["CE"] = scaled_model.nll_vals
             gamma_dict[link_name][key]["ECE"]  = scaled_model.ece_vals
@@ -304,16 +343,29 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
             evaluation_metrics['test']['uncalibrated'][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
                 
             if train_labels is not None:
+                # TODO: Consider adding an option to have train-fit temeprature as an oracle evaluation
+                # scaled_model.set_temperature(train_logits, train_labels, cross_validate='ece', device=device)
+
                 train_pred = get_probs(train_logits, T=1, a=link_value, link=link_name)
-                evaluation_metrics['train']['uncalibrated'][link_name][key] = evaluate(train_labels, train_pred, num_classes=num_classes)
-            
-                scaled_model.set_temperature(train_logits, train_labels, cross_validate='ece', device=device)
+                evaluation_metrics['train']['uncalibrated'][link_name][key] = evaluate(
+                    train_labels,
+                    train_pred,
+                    num_classes=num_classes,
+                    smooth_ece_sample_size=train_smooth_ece_sample_size,
+                    smooth_ece_sample_seed=seed,
+                )
 
                 for T_metric in ['ce', 'ece']:
-                    train_T_opt = scaled_model.get_temperature(metric=T_metric)
-
-                    train_pred = get_probs(train_logits, T=train_T_opt, a=link_value, link=link_name)
-                    evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = evaluate(train_labels, train_pred, num_classes=num_classes)
+                    # train_T_opt = scaled_model.get_temperature(metric=T_metric)
+                    T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
+                    train_pred = get_probs(train_logits, T=T_opt, a=link_value, link=link_name)
+                    evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = evaluate(
+                        train_labels,
+                        train_pred,
+                        num_classes=num_classes,
+                        smooth_ece_sample_size=train_smooth_ece_sample_size,
+                        smooth_ece_sample_seed=seed,
+                    )
 
             for T_metric in ['ce', 'ece']:
                 T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece

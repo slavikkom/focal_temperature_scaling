@@ -77,6 +77,12 @@ def parse_args():
                         help="Save test probabilities for the selected --links and optional --dirichlet calibration.")
     parser.add_argument("--json-precision", type=int, default=5, dest="json_precision",
                         help="Number of decimal places to keep for floating point values saved to JSON.")
+    parser.add_argument("--train-smece-sample-size", type=int, default=5000,
+                        dest="train_smooth_ece_sample_size",
+                        help=(
+                            "Number of train examples to use when estimating smECE and smECE_0.05. "
+                            "Use 0 or a negative value to evaluate the full train set."
+                        ))
     return parser.parse_args()
 
 
