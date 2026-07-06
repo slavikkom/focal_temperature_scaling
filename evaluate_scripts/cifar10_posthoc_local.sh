@@ -54,6 +54,10 @@ run_posthoc() {
     --saved_model_name "$model_file" \
     -log \
     --links "${EVALUATE_LINKS[@]}" \
+    --dirichlet \
+    --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
+    --dirichlet-max-iter 1000 \
+    --dirichlet-n-jobs 1 \
     --seed "$seed" 
     # > "$save_eval_path/${model_name}_posthoc.txt"
 }
