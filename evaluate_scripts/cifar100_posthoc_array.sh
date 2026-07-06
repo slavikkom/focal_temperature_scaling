@@ -28,6 +28,7 @@ ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 EPOCH=350
 SMOKE_ARG=""
@@ -59,8 +60,14 @@ COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
   for model in "${MODELS[@]}"; do
     case $model in
+      "resnet50_brier_score")
+        COMBINATIONS+=("$seed_idx|$model|none|none")
+        ;;
       "resnet50_cross_entropy")
         COMBINATIONS+=("$seed_idx|$model|none|none")
+        for smoothing in "${LABEL_SMOOTHING_VALUES[@]}"; do
+          COMBINATIONS+=("$seed_idx|${model}_${smoothing}|none|none")
+        done
         ;;
       "resnet50_exp_1mp"|"resnet50_exp_p")
         for alpha in "${ALPHAS[@]}"; do

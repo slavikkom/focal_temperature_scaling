@@ -7,7 +7,7 @@
 #SBATCH --output=slurm_logs_tinyimagenet/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=01:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
