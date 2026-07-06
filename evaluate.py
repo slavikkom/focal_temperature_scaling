@@ -13,6 +13,7 @@ import torch.backends.cudnn as cudnn
 import Data.cifar10 as cifar10
 import Data.cifar10_c as cifar10_c
 import Data.cifar100 as cifar100
+import Data.cifar100_c as cifar100_c
 import Data.tiny_imagenet as tiny_imagenet
 import Data.medmnist_loader as get_medmnist_data_loader
 import medmnist
@@ -56,6 +57,7 @@ dataset_num_classes = {
     'cifar10': 10,
     'cifar10_c': 10,
     'cifar100': 100,
+    'cifar100_c': 100,
     'tiny_imagenet': 200,
 }
 
@@ -66,6 +68,7 @@ dataset_loader = {
     'cifar10': cifar10,
     'cifar10_c': cifar10_c,
     'cifar100': cifar100,
+    'cifar100_c': cifar100_c,
     'tiny_imagenet': tiny_imagenet,
 }
 
@@ -587,10 +590,10 @@ def logits_metadata(args, split_logits, split_labels, split_filenames,
         "splits": split_info,
         "cli_args": json_safe_args(args),
     }
-    if args.dataset == "cifar10_c":
+    if args.dataset in ("cifar10_c", "cifar100_c"):
         metadata["corruption"] = args.corruption
         metadata["severity"] = args.severity
-        metadata["train_val_source"] = "clean_cifar10"
+        metadata["train_val_source"] = args.dataset.replace("_c", "")
     return metadata
 
 def save_logits_artifact(save_eval_loc, args, split_logits, split_labels,
@@ -854,7 +857,7 @@ if __name__ == "__main__":
             "pin_memory": args.gpu,
             "smoke_test": args.smoke_test,
         }
-        if args.dataset == 'cifar10_c':
+        if args.dataset in ('cifar10_c', 'cifar100_c'):
             test_loader_kwargs["corruption"] = args.corruption
             test_loader_kwargs["severity"] = args.severity
 
