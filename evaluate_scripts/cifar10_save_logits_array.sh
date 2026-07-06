@@ -1,117 +1,77 @@
 #!/bin/bash
-# Instruction how to use this script: first make any modifications to the
-# parameters, corruptions, severities, and models below and then run as a bash
-# script to see the total number of jobs. Once you know the total number of jobs,
-# submit the job to slurm with:
-# sbatch --array=0-<total_jobs_minus_1> cifar10c_eval_array.sh
+# Save CIFAR-10 train/val/test logits without running post-hoc calibration.
+# Submit with:
+# sbatch --array=0-<total_jobs_minus_1> cifar10_save_logits_array.sh
 
-#SBATCH --job-name=eval_cf10c
-#SBATCH --output=slurm_logs_cifar10c/eval_job_%A_%a.out
+#SBATCH --job-name=logits_cf10
+#SBATCH --output=slurm_logs_cifar10/logits_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
+#SBATCH --time=00:30:00
 #SBATCH --mem=20G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 
-
-# Environment setup (modify if needed)
 source ~/.bashrc
 if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)"
 fi
 conda activate focal_scaling
 
-# Configurable seed list and parameter values
 SEED_DIRS=(42 123 2023)
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
-# GAMMAS=(2.0 3.0 5.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
-CORRUPTIONS=(
-  "brightness"
-  "contrast"
-  "defocus_blur"
-  "elastic_transform"
-  "fog"
-  "frost"
-  "gaussian_blur"
-  "gaussian_noise"
-  "glass_blur"
-  "impulse_noise"
-  "jpeg_compression"
-  "motion_blur"
-  "pixelate"
-  "saturate"
-  "shot_noise"
-  "snow"
-  "spatter"
-  "speckle_noise"
-  "zoom_blur"
-)
-SEVERITIES=(1 2 3 4 5)
-
 EPOCH=350
-SMOKE_ARG="" # --smoke-test for quick check or empty string for full run
+SMOKE_ARG=""
 GPU_FLAG="-g"
-DEBUG=${DEBUG:-false} # set to true for debugging which won't run the evaluation only to debug this script by printouts
+DEBUG=${DEBUG:-false}
 
 DATASET_ROOT="../Data/datasets"
 SAVE_BASE="../MODEL_DIRECTORY/CIFAR10"
-EVAL_BASE="../RESULTS/CIFAR10C"
+LOGITS_BASE="../RESULTS/CIFAR10_LOGITS_epoch${EPOCH}"
 
-mkdir -p "$EVAL_BASE"
-
-# List of model patterns (comment out to exclude any)
 MODELS=(
-  "resnet50_brier_score"
-  # "resnet50_proper_focal_loss"
   "resnet50_cross_entropy"
+  "resnet50_brier_score"
   "resnet50_exp_1mp"
   "resnet50_exp_p"
-  # "resnet50_focal_loss_adaptive"
   "resnet50_focal_loss"
-  # "resnet50_generalized_focal"
-  # "resnet50_linear"
-  # "resnet50_log_power"
-  # "resnet50_one_minus_power"
+  "resnet50_linear"
+  "resnet50_log_power"
+  "resnet50_one_minus_power"
+  "resnet50_proper_focal_loss"
 )
 
-# Build one array job per model/seed. Each job loops over corruptions/severities.
 COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
   for model in "${MODELS[@]}"; do
     case $model in
       "resnet50_brier_score")
-        # No parameters required
         COMBINATIONS+=("$seed_idx|$model|none|none")
         ;;
       "resnet50_cross_entropy")
-        # No parameters required
         COMBINATIONS+=("$seed_idx|$model|none|none")
         for smoothing in "${LABEL_SMOOTHING_VALUES[@]}"; do
           COMBINATIONS+=("$seed_idx|${model}_${smoothing}|none|none")
         done
         ;;
       "resnet50_exp_1mp"|"resnet50_exp_p")
-        # Single alpha parameter
         for alpha in "${ALPHAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|alpha_$alpha|none")
         done
         ;;
       "resnet50_focal_loss_adaptive"|"resnet50_focal_loss"|"resnet50_proper_focal_loss")
-        # Single gamma parameter
         for gamma in "${GAMMAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|gamma_$gamma|none")
         done
         ;;
       "resnet50_generalized_focal")
-        # Both gamma and beta parameters
         for gamma in "${GAMMAS[@]}"; do
           for beta in "${BETAS[@]}"; do
             COMBINATIONS+=("$seed_idx|$model|beta_$beta|gamma_$gamma")
@@ -119,13 +79,11 @@ for seed_idx in "${SEED_DIRS[@]}"; do
         done
         ;;
       "resnet50_linear"|"resnet50_one_minus_power")
-        # Single beta parameter
         for beta in "${BETAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|beta_$beta|none")
         done
         ;;
       "resnet50_log_power")
-        # Single kappa parameter
         for kappa in "${KAPPAS[@]}"; do
           COMBINATIONS+=("$seed_idx|$model|kappa_$kappa|none")
         done
@@ -134,10 +92,8 @@ for seed_idx in "${SEED_DIRS[@]}"; do
   done
 done
 
-# Calculate total jobs based on the length of the combinations list
 TOTAL_JOBS=${#COMBINATIONS[@]}
 
-# Dynamically determine SLURM_ARRAY_TASK_ID upper bound
 if [ "$DEBUG" = true ]; then
   echo "Total jobs: $TOTAL_JOBS"
   if [ -z "$SLURM_ARRAY_TASK_ID" ]; then
@@ -155,14 +111,10 @@ if [ "$SLURM_ARRAY_TASK_ID" -ge "$TOTAL_JOBS" ]; then
   exit 1
 fi
 
-# Parse the selected combination
 entry=${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}
 IFS='|' read -r SEED_IDX MODEL PARAM1 PARAM2 <<< "$entry"
 
-# Paths
 SAVE_PATH="$SAVE_BASE/${SEED_IDX}/"
-
-# Construct save paths based on the parsed combination
 if [[ "$PARAM1" == "none" && "$PARAM2" == "none" ]]; then
   MODEL_NAME="${MODEL}"
 elif [[ "$PARAM2" == "none" ]]; then
@@ -170,45 +122,27 @@ elif [[ "$PARAM2" == "none" ]]; then
 else
   MODEL_NAME="${MODEL}_${PARAM1}_${PARAM2}"
 fi
-
-# Construct filename
 MODEL_FILE="${MODEL_NAME}_${EPOCH}.model"
+LOGITS_PATH="$LOGITS_BASE/${SEED_IDX}/${MODEL_NAME}/"
+mkdir -p "$LOGITS_PATH"
 
-# Log info
 echo "Saved Models Path: $SAVE_PATH"
+echo "Logits Path: $LOGITS_PATH"
 echo "Model Filename: $MODEL_FILE"
-echo "Evaluating: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
-if [ "$DEBUG" = true ]; then
-  printf '%s\n' "${COMBINATIONS[@]}"
+echo "Saving logits: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
+
+if [ "$DEBUG" = false ]; then
+  python ../evaluate.py \
+    --dataset cifar10 \
+    --dataset-root "$DATASET_ROOT" \
+    --model resnet50 \
+    -log \
+    $GPU_FLAG \
+    $SMOKE_ARG \
+    --inference-only \
+    --save-path "$SAVE_PATH" \
+    --save-eval-path "$LOGITS_PATH" \
+    --saved_model_name "$MODEL_FILE" \
+    --seed "$SEED_IDX" \
+    >> "${LOGITS_PATH}/${MODEL_NAME}_logits.txt"
 fi
-
-# exit 0
-
-# Run evaluation
-for corruption in "${CORRUPTIONS[@]}"; do
-  for severity in "${SEVERITIES[@]}"; do
-    SAVE_EVAL_PATH="$EVAL_BASE/${corruption}-${severity}/${SEED_IDX}/"
-    mkdir -p "$SAVE_EVAL_PATH"
-
-    echo "Evaluating corruption=$corruption severity=$severity"
-    echo "Save Eval Path: $SAVE_EVAL_PATH"
-
-    if [ "$DEBUG" = false ]; then
-      python ../evaluate.py \
-        --dataset cifar10_c \
-        --dataset-root "$DATASET_ROOT" \
-        --corruption "$corruption" \
-        --severity "$severity" \
-        --model resnet50 \
-        -log \
-        $GPU_FLAG \
-        $SMOKE_ARG \
-        --save-path "$SAVE_PATH" \
-        --save-eval-path "$SAVE_EVAL_PATH" \
-        --saved_model_name "$MODEL_FILE" \
-        --links softmax \
-        --seed "$SEED_IDX" \
-        >> "${SAVE_EVAL_PATH}/${MODEL_NAME}.txt"
-    fi
-  done
-done

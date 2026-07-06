@@ -164,6 +164,13 @@ def parseArgs():
     parser.add_argument("--seed", type=int, default=1,
         dest="seed", help="random seed for reproducibility")
 
+    parser.add_argument("--inference-only", action="store_true", dest="inference_only",
+        help=(
+            "Only run train/validation/test inference and save a complete logits artifact. "
+            "Skips all post-hoc calibration, probability exports, and evaluation JSON writing."
+        ))
+    parser.set_defaults(inference_only=False)
+
     parser.add_argument("--save-train-logits", action="store_true", dest="save_train_logits",
         help="Save train logits, labels, and indices to file.")
     parser.add_argument("--save-val-logits", action="store_true", dest="save_val_logits",
@@ -375,12 +382,22 @@ def to_numpy(values):
     return np.asarray(values)
 
 
-def save_logits_labels_indices_npz(filename, logits, labels, indices=None):
+def save_logits_labels_indices_npz(filename, logits, labels, indices=None,
+                                   split=None, num_classes=None):
     logits = to_numpy(logits)
     labels = to_numpy(labels)
     if indices is None:
         indices = np.arange(len(labels))
-    np.savez(filename, logits=logits, labels=labels, indices=indices)
+    arrays = {
+        "logits": logits,
+        "labels": labels,
+        "indices": indices,
+    }
+    if split is not None:
+        arrays["split"] = np.asarray(split)
+    if num_classes is not None:
+        arrays["num_classes"] = np.asarray(num_classes)
+    np.savez(filename, **arrays)
 
 
 def save_probs_labels_indices_npz(filename, probs, labels, indices=None, metadata=None):
@@ -531,6 +548,171 @@ def save_evaluation_json(stats, json_path):
             fcntl.flock(lock_file, fcntl.LOCK_UN)
             lock_file.close()
 
+def json_safe_args(args):
+    safe_args = {}
+    for key, value in vars(args).items():
+        safe_args[key] = round_floats_for_json(value)
+    return safe_args
+
+def logits_metadata(args, split_logits, split_labels, split_filenames,
+                    num_classes, num_channels):
+    split_info = {}
+    for split_name, logits in split_logits.items():
+        split_info[split_name] = {
+            "filename": split_filenames[split_name],
+            "num_examples": int(len(split_labels[split_name])),
+            "logits_shape": list(to_numpy(logits).shape),
+        }
+
+    metadata = {
+        "dataset": args.dataset,
+        "dataset_root": args.dataset_root,
+        "model": args.model,
+        "model_name": args.model_name,
+        "saved_model_name": args.saved_model_name,
+        "save_path": args.save_loc,
+        "seed": int(args.seed),
+        "smoke_test": bool(args.smoke_test),
+        "num_classes": int(num_classes),
+        "num_channels": int(num_channels),
+        "train_batch_size": int(args.train_batch_size),
+        "test_batch_size": int(args.test_batch_size),
+        "data_aug": bool(args.data_aug),
+        "splits": split_info,
+        "cli_args": json_safe_args(args),
+    }
+    if args.dataset == "cifar10_c":
+        metadata["corruption"] = args.corruption
+        metadata["severity"] = args.severity
+        metadata["train_val_source"] = "clean_cifar10"
+    return metadata
+
+def save_logits_artifact(save_eval_loc, args, split_logits, split_labels,
+                         num_classes, num_channels):
+    if not os.path.exists(save_eval_loc):
+        os.makedirs(save_eval_loc)
+
+    split_filenames = {
+        "train": "train_logits_labels_indices.npz",
+        "val": "val_logits_labels_indices.npz",
+        "test": "test_logits_labels_indices.npz",
+    }
+    for split_name in ["train", "val", "test"]:
+        filename = os.path.join(save_eval_loc, split_filenames[split_name])
+        save_logits_labels_indices_npz(
+            filename,
+            split_logits[split_name],
+            split_labels[split_name],
+            split=split_name,
+            num_classes=num_classes,
+        )
+        print("Saved {} logits: {}".format(split_name, filename))
+
+    metadata = logits_metadata(
+        args,
+        split_logits,
+        split_labels,
+        split_filenames,
+        num_classes,
+        num_channels,
+    )
+    metadata_path = os.path.join(save_eval_loc, "logits_metadata.json")
+    with open(metadata_path, "w") as f:
+        json.dump(metadata, f, indent=2)
+    print("Saved logits metadata: {}".format(metadata_path))
+
+def evaluation_json_path(save_eval_loc, saved_model_name, model_name):
+    model_stem = os.path.splitext(saved_model_name)[0]
+    model_prefix = model_name + "_"
+    if model_stem.startswith(model_prefix):
+        saved_stats_name = model_stem[len(model_prefix):]
+    else:
+        saved_stats_name = model_stem
+    save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
+    return save_stats_path + ".json"
+
+def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
+                           val_labels, test_logits, test_labels, num_classes,
+                           device, net=None):
+    active_link_dict = get_active_link_dict(args.links)
+    probability_export_splits = get_probability_export_splits(args)
+    save_any_probs = len(probability_export_splits) > 0
+
+    if net is None:
+        net = nn.Identity().to(device)
+
+    stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
+                                          num_classes=num_classes, device=device,
+                                          train_logits=train_logits,
+                                          train_labels=train_labels,
+                                          links=args.links)
+    dirichlet_probabilities = None
+    needs_dirichlet_probabilities = save_any_probs and args.dirichlet
+    if args.dirichlet or needs_dirichlet_probabilities:
+        dirichlet_result = dirichlet_calibration_evaluation(
+            val_logits, val_labels, test_logits, test_labels,
+            num_classes=num_classes, device=device,
+            train_logits=train_logits,
+            train_labels=train_labels,
+            cv_folds=args.dirichlet_cv_folds,
+            reg_grid=args.dirichlet_reg_grid,
+            max_iter=args.dirichlet_max_iter,
+            n_jobs=args.dirichlet_n_jobs,
+            seed=args.seed,
+            smoke_test=args.smoke_test,
+            return_probabilities=needs_dirichlet_probabilities)
+        if needs_dirichlet_probabilities:
+            dirichlet_stats, dirichlet_probabilities = dirichlet_result
+        else:
+            dirichlet_stats = dirichlet_result
+        stats["dirichlet_calibrated"] = dirichlet_stats
+
+    if not os.path.exists(args.save_eval_loc):
+        os.makedirs(args.save_eval_loc)
+
+    save_stats_json_path = evaluation_json_path(
+        args.save_eval_loc,
+        args.saved_model_name,
+        args.model_name,
+    )
+    rounded_stats = round_floats_for_json(stats, args.json_precision)
+    save_evaluation_json(rounded_stats, save_stats_json_path)
+
+    if save_any_probs:
+        probability_export_specs = probability_export_specs_from_stats(
+            stats,
+            active_link_dict,
+            include_dirichlet=args.dirichlet,
+        )
+        log_probability_export_specs(probability_export_specs)
+        all_split_logits = {
+            "train": train_logits,
+            "val": val_logits,
+            "test": test_logits,
+        }
+        all_split_labels = {
+            "train": train_labels,
+            "val": val_labels,
+            "test": test_labels,
+        }
+        split_logits = {
+            split: all_split_logits[split]
+            for split in probability_export_splits
+        }
+        split_labels = {
+            split: all_split_labels[split]
+            for split in probability_export_splits
+        }
+        save_probability_exports(
+            args.save_eval_loc,
+            split_logits,
+            split_labels,
+            probability_export_specs,
+            dirichlet_probabilities=dirichlet_probabilities,
+        )
+
+    return stats, save_stats_json_path
+
 def get_logits_labels(data_loader, net, device):
     logits_list = []
     labels_list = []
@@ -571,9 +753,6 @@ if __name__ == "__main__":
 
     args = parseArgs()
     args.links = normalize_links(args.links)
-    active_link_dict = get_active_link_dict(args.links)
-    probability_export_splits = get_probability_export_splits(args)
-    save_any_probs = len(probability_export_splits) > 0
 
     # Setting additional parameters
     set_seed(args.seed)
@@ -716,6 +895,29 @@ if __name__ == "__main__":
     train_logits, train_labels = get_logits_labels(train_loader, net, device=device)
     val_logits, val_labels = get_logits_labels(val_loader, net, device=device)
     test_logits, test_labels = get_logits_labels(test_loader, net, device=device)
+
+    if args.inference_only:
+        split_logits = {
+            "train": train_logits,
+            "val": val_logits,
+            "test": test_logits,
+        }
+        split_labels = {
+            "train": train_labels,
+            "val": val_labels,
+            "test": test_labels,
+        }
+        save_logits_artifact(
+            args.save_eval_loc,
+            args,
+            split_logits,
+            split_labels,
+            num_classes,
+            num_channels,
+        )
+        print("Inference-only mode complete. Post-hoc calibration was skipped.")
+        sys.exit(0)
+
     conf_matrix, p_accuracy, _, _, _ = test_classification_net_logits(test_logits, test_labels)
 
     p_ece = ece_criterion(test_logits, test_labels).item()
@@ -748,88 +950,25 @@ if __name__ == "__main__":
     adaece = adaece_criterion(logits, labels).item()
     cece = cece_criterion(logits, labels).item()
     nll = nll_criterion(logits, labels).item()
-    
-
-    stats = focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_labels,
-                                          num_classes=num_classes, device=device,
-                                          train_logits=train_logits,
-                                          train_labels=train_labels,
-                                          links=args.links)
-    dirichlet_probabilities = None
-    needs_dirichlet_probabilities = save_any_probs and args.dirichlet
-    if args.dirichlet or needs_dirichlet_probabilities:
-        dirichlet_result = dirichlet_calibration_evaluation(
-            val_logits, val_labels, test_logits, test_labels,
-            num_classes=num_classes, device=device,
-            train_logits=train_logits,
-            train_labels=train_labels,
-            cv_folds=args.dirichlet_cv_folds,
-            reg_grid=args.dirichlet_reg_grid,
-            max_iter=args.dirichlet_max_iter,
-            n_jobs=args.dirichlet_n_jobs,
-            seed=args.seed,
-            smoke_test=args.smoke_test,
-            return_probabilities=needs_dirichlet_probabilities)
-        if needs_dirichlet_probabilities:
-            dirichlet_stats, dirichlet_probabilities = dirichlet_result
-        else:
-            dirichlet_stats = dirichlet_result
-        stats["dirichlet_calibrated"] = dirichlet_stats
-    # stats = round_floats(stats)
-
-    # Ensure the save directory exists
-    if not os.path.exists(args.save_eval_loc):
-        os.makedirs(args.save_eval_loc)
-
-    model_stem = os.path.splitext(saved_model_name)[0]
-    model_prefix = args.model_name + "_"
-    if model_stem.startswith(model_prefix):
-        saved_stats_name = model_stem[len(model_prefix):]
-    else:
-        saved_stats_name = model_stem
-    save_stats_path = os.path.join(save_eval_loc, saved_stats_name)
-    save_stats_json_path = save_stats_path + ".json"
-    rounded_stats = round_floats_for_json(stats, args.json_precision)
-    save_evaluation_json(rounded_stats, save_stats_json_path)
+    stats, save_stats_json_path = run_posthoc_evaluation(
+        args,
+        train_logits,
+        train_labels,
+        val_logits,
+        val_labels,
+        test_logits,
+        test_labels,
+        num_classes,
+        device,
+        net=net,
+    )
 
     if args.save_train_logits:
-        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels)
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'train_logits_labels_indices.npz'), train_logits, train_labels, split="train", num_classes=num_classes)
     if args.save_val_logits:
-        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'val_logits_labels_indices.npz'), val_logits, val_labels)
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'val_logits_labels_indices.npz'), val_logits, val_labels, split="val", num_classes=num_classes)
     if args.save_test_logits:
-        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'test_logits_labels_indices.npz'), test_logits, test_labels)
-    if save_any_probs:
-        probability_export_specs = probability_export_specs_from_stats(
-            stats,
-            active_link_dict,
-            include_dirichlet=args.dirichlet,
-        )
-        log_probability_export_specs(probability_export_specs)
-        all_split_logits = {
-            "train": train_logits,
-            "val": val_logits,
-            "test": test_logits,
-        }
-        all_split_labels = {
-            "train": train_labels,
-            "val": val_labels,
-            "test": test_labels,
-        }
-        split_logits = {
-            split: all_split_logits[split]
-            for split in probability_export_splits
-        }
-        split_labels = {
-            split: all_split_labels[split]
-            for split in probability_export_splits
-        }
-        save_probability_exports(
-            args.save_eval_loc,
-            split_logits,
-            split_labels,
-            probability_export_specs,
-            dirichlet_probabilities=dirichlet_probabilities,
-        )
+        save_logits_labels_indices_npz(os.path.join(args.save_eval_loc, 'test_logits_labels_indices.npz'), test_logits, test_labels, split="test", num_classes=num_classes)
 
     res_str += '&{:.4f}({:.2f})&{:.4f}&{:.4f}&{:.4f}'.format(nll,  T_opt,  ece,  adaece, cece)
 
