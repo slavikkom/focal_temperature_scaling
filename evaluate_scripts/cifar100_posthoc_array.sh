@@ -34,8 +34,8 @@ SMOKE_ARG=""
 GPU_FLAG="" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
-LOGITS_BASE="../RESULTS/CIFAR100_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/CIFAR100_POSTHOC_epoch${EPOCH}"
+LOGITS_BASE="../RESULTS/july26/CIFAR100_LOGITS_epoch${EPOCH}"
+EVAL_BASE="../RESULTS/july26/CIFAR100_POSTHOC_epoch${EPOCH}"
 EVALUATE_LINKS=(softmax focal exp_p exp_1mp) #(all)
 DIRICHLET_ARG="
   --dirichlet \
