@@ -15,9 +15,9 @@ LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 MODELS=(
   "resnet50_cross_entropy"
   "resnet50_brier_score"
-  # "resnet50_exp_1mp"
-  # "resnet50_exp_p"
   "resnet50_focal_loss"
+  "resnet50_exp_1mp"
+  "resnet50_exp_p"
   # "resnet50_linear"
   # "resnet50_log_power"
   # "resnet50_one_minus_power"
