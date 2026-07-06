@@ -5,20 +5,23 @@
 
 #SBATCH --job-name=posthoc_cf10
 #SBATCH --output=slurm_logs_cifar10/posthoc_job_%A_%a.out
-#SBATCH --partition=gpu
-#SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
+#SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:1
 #SBATCH --time=00:30:00
-#SBATCH --mem=20G
+#SBATCH --mem=12G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=2
 
 source ~/.bashrc
 if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)"
 fi
 conda activate focal_scaling
+
+export CUDA_VISIBLE_DEVICES=""
+export OMP_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+export MKL_NUM_THREADS="$SLURM_CPUS_PER_TASK"
+export OPENBLAS_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 
 SEED_DIRS=(42 123 2023)
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
@@ -29,13 +32,18 @@ LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 EPOCH=350
 SMOKE_ARG=""
-GPU_FLAG="-g"
+GPU_FLAG="" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
-LOGITS_BASE="../RESULTS/CIFAR10_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/CIFAR10_POSTHOC_epoch${EPOCH}"
-EVALUATE_LINKS=(all)
-DIRICHLET_ARG=""
+LOGITS_BASE="../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}"
+EVAL_BASE="../RESULTS/july26/CIFAR10_POSTHOC_epoch${EPOCH}"
+EVALUATE_LINKS=(softmax focal exp_p exp_1mp) #(all)
+DIRICHLET_ARG="
+  --dirichlet \
+  --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
+  --dirichlet-max-iter 1000 \
+  --dirichlet-n-jobs 1 \
+"
 
 MODELS=(
   "resnet50_cross_entropy"

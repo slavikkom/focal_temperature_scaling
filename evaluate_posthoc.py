@@ -154,7 +154,7 @@ def main():
     args = fill_args_from_metadata(args, metadata)
     set_seed(args.seed)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda" if args.gpu and torch.cuda.is_available() else "cpu")
     train_logits, train_labels = load_split_npz(args.logits_path, "train", device)
     val_logits, val_labels = load_split_npz(args.logits_path, "val", device)
     test_logits, test_labels = load_split_npz(args.logits_path, "test", device)
