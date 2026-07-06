@@ -25,6 +25,7 @@ ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 EPOCH=100
 SMOKE_ARG=""
@@ -33,7 +34,7 @@ DEBUG=${DEBUG:-false}
 
 DATASET_ROOT="../Data/datasets/tinyimagenet"
 SAVE_BASE="../MODEL_DIRECTORY/TINYIMAGENET"
-LOGITS_BASE="../RESULTS/TINYIMAGENET_LOGITS_epoch${EPOCH}"
+LOGITS_BASE="../RESULTS/july26/TINYIMAGENET_LOGITS_epoch${EPOCH}"
 
 MODELS=(
   "resnet50_ti_cross_entropy"
@@ -50,8 +51,14 @@ COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
   for model in "${MODELS[@]}"; do
     case $model in
-      "resnet50_ti_brier_score"|"resnet50_ti_cross_entropy")
+      "resnet50_ti_brier_score")
         COMBINATIONS+=("$seed_idx|$model|none|none")
+        ;;
+      "resnet50_ti_cross_entropy")
+        COMBINATIONS+=("$seed_idx|$model|none|none")
+        for smoothing in "${LABEL_SMOOTHING_VALUES[@]}"; do
+          COMBINATIONS+=("$seed_idx|${model}_${smoothing}|none|none")
+        done
         ;;
       "resnet50_ti_exp_1mp"|"resnet50_ti_exp_p")
         for alpha in "${ALPHAS[@]}"; do

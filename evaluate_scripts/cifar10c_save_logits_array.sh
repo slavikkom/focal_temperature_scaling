@@ -9,7 +9,7 @@
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=00:30:00
+#SBATCH --time=01:30:00
 #SBATCH --mem=20G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
@@ -57,7 +57,7 @@ DEBUG=${DEBUG:-false}
 
 DATASET_ROOT="../Data/datasets"
 SAVE_BASE="../MODEL_DIRECTORY/CIFAR10"
-LOGITS_BASE="../RESULTS/CIFAR10C_LOGITS_epoch${EPOCH}"
+LOGITS_BASE="../RESULTS/july26/CIFAR10C_LOGITS_epoch${EPOCH}"
 
 MODELS=(
   "resnet50_cross_entropy"

@@ -4,7 +4,7 @@
 # sbatch --array=0-<total_jobs_minus_1> cifar10_save_logits_array.sh
 
 #SBATCH --job-name=logits_cf10
-#SBATCH --output=slurm_logs_cifar10/logits_job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar10_infonly/logits_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
@@ -34,18 +34,18 @@ DEBUG=${DEBUG:-false}
 
 DATASET_ROOT="../Data/datasets"
 SAVE_BASE="../MODEL_DIRECTORY/CIFAR10"
-LOGITS_BASE="../RESULTS/CIFAR10_LOGITS_epoch${EPOCH}"
+LOGITS_BASE="../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}"
 
 MODELS=(
   "resnet50_cross_entropy"
   "resnet50_brier_score"
+  "resnet50_focal_loss"
   "resnet50_exp_1mp"
   "resnet50_exp_p"
-  "resnet50_focal_loss"
-  "resnet50_linear"
-  "resnet50_log_power"
-  "resnet50_one_minus_power"
-  "resnet50_proper_focal_loss"
+  # "resnet50_linear"
+  # "resnet50_log_power"
+  # "resnet50_one_minus_power"
+  # "resnet50_proper_focal_loss"
 )
 
 COMBINATIONS=()
