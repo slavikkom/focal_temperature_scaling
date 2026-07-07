@@ -1,14 +1,14 @@
 #!/bin/bash
 # Run CIFAR-10-C post-hoc calibration from saved logits.
 # Submit after cifar10c_save_logits_array.sh with:
-# One array task is one seed/model/corruption/severity combination.
+# One array task is one seed/model/severity combination.
 # sbatch --array=0-<total_jobs_minus_1> cifar10c_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_cf10c
 #SBATCH --output=slurm_logs_cifar10c/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=01:00:00
+#SBATCH --time=24:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
@@ -123,10 +123,8 @@ done
 
 COMBINATIONS=()
 for model_entry in "${MODEL_COMBINATIONS[@]}"; do
-  for corruption in "${CORRUPTIONS[@]}"; do
-    for severity in "${SEVERITIES[@]}"; do
-      COMBINATIONS+=("$model_entry|$corruption|$severity")
-    done
+  for severity in "${SEVERITIES[@]}"; do
+    COMBINATIONS+=("$model_entry|$severity")
   done
 done
 
@@ -150,7 +148,7 @@ if [ "$SLURM_ARRAY_TASK_ID" -ge "$TOTAL_JOBS" ]; then
 fi
 
 entry=${COMBINATIONS[$SLURM_ARRAY_TASK_ID]}
-IFS='|' read -r SEED_IDX MODEL PARAM1 PARAM2 CORRUPTION SEVERITY <<< "$entry"
+IFS='|' read -r SEED_IDX MODEL PARAM1 PARAM2 SEVERITY <<< "$entry"
 
 if [[ "$PARAM1" == "none" && "$PARAM2" == "none" ]]; then
   MODEL_NAME="${MODEL}"
@@ -160,28 +158,33 @@ else
   MODEL_NAME="${MODEL}_${PARAM1}_${PARAM2}"
 fi
 MODEL_FILE="${MODEL_NAME}_${EPOCH}.model"
-LOGITS_PATH="$LOGITS_BASE/${CORRUPTION}-${SEVERITY}/${SEED_IDX}/${MODEL_NAME}/"
-SAVE_EVAL_PATH="$EVAL_BASE/${CORRUPTION}-${SEVERITY}/${SEED_IDX}/"
-mkdir -p "$SAVE_EVAL_PATH"
 
 echo "Posthoc calibration: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
-echo "Posthoc corruption=$CORRUPTION severity=$SEVERITY"
-echo "Logits Path: $LOGITS_PATH"
-echo "Save Eval Path: $SAVE_EVAL_PATH"
+echo "Posthoc severity=$SEVERITY"
 
-if [ "$DEBUG" = false ]; then
-  python ../evaluate_posthoc.py \
-    --logits-path "$LOGITS_PATH" \
-    --save-eval-path "$SAVE_EVAL_PATH" \
-    --dataset cifar10_c \
-    --model resnet50 \
-    --model-name resnet50 \
-    --saved_model_name "$MODEL_FILE" \
-    -log \
-    $GPU_FLAG \
-    $SMOKE_ARG \
-    --links "${EVALUATE_LINKS[@]}" \
-    $DIRICHLET_ARG \
-    --seed "$SEED_IDX" \
-    >> "${SAVE_EVAL_PATH}/${MODEL_NAME}_posthoc.txt"
-fi
+for corruption in "${CORRUPTIONS[@]}"; do
+  LOGITS_PATH="$LOGITS_BASE/${corruption}-${SEVERITY}/${SEED_IDX}/${MODEL_NAME}/"
+  SAVE_EVAL_PATH="$EVAL_BASE/${corruption}-${SEVERITY}/${SEED_IDX}/"
+  mkdir -p "$SAVE_EVAL_PATH"
+
+  echo "Posthoc corruption=$corruption severity=$SEVERITY"
+  echo "Logits Path: $LOGITS_PATH"
+  echo "Save Eval Path: $SAVE_EVAL_PATH"
+
+  if [ "$DEBUG" = false ]; then
+    python ../evaluate_posthoc.py \
+      --logits-path "$LOGITS_PATH" \
+      --save-eval-path "$SAVE_EVAL_PATH" \
+      --dataset cifar10_c \
+      --model resnet50 \
+      --model-name resnet50 \
+      --saved_model_name "$MODEL_FILE" \
+      -log \
+      $GPU_FLAG \
+      $SMOKE_ARG \
+      --links "${EVALUATE_LINKS[@]}" \
+      $DIRICHLET_ARG \
+      --seed "$SEED_IDX" \
+      >> "${SAVE_EVAL_PATH}/${MODEL_NAME}_posthoc.txt"
+  fi
+done
