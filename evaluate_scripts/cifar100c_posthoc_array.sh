@@ -158,18 +158,53 @@ else
   MODEL_NAME="${MODEL}_${PARAM1}_${PARAM2}"
 fi
 MODEL_FILE="${MODEL_NAME}_${EPOCH}.model"
+MODEL_STEM="${MODEL_FILE%.model}"
+MODEL_PREFIX="resnet50_"
+if [[ "$MODEL_STEM" == "$MODEL_PREFIX"* ]]; then
+  RESULT_STEM="${MODEL_STEM#$MODEL_PREFIX}"
+else
+  RESULT_STEM="$MODEL_STEM"
+fi
+
+posthoc_json_path() {
+  local save_eval_path="$1"
+  printf '%s/%s.json\n' "$save_eval_path" "$RESULT_STEM"
+}
 
 echo "Posthoc calibration: SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME"
 echo "Posthoc severity=$SEVERITY"
 
+ALL_RESULTS_EXIST=true
+for corruption in "${CORRUPTIONS[@]}"; do
+  SAVE_EVAL_PATH="$EVAL_BASE/${corruption}-${SEVERITY}/${SEED_IDX}/"
+  RESULT_JSON="$(posthoc_json_path "$SAVE_EVAL_PATH")"
+  if [ ! -s "$RESULT_JSON" ]; then
+    ALL_RESULTS_EXIST=false
+    break
+  fi
+done
+
+if [ "$ALL_RESULTS_EXIST" = true ]; then
+  echo "All posthoc results already exist for SEED_IDX=$SEED_IDX, MODEL=$MODEL_NAME, severity=$SEVERITY. Skipping job."
+  exit 0
+fi
+
 for corruption in "${CORRUPTIONS[@]}"; do
   LOGITS_PATH="$LOGITS_BASE/${corruption}-${SEVERITY}/${SEED_IDX}/${MODEL_NAME}/"
   SAVE_EVAL_PATH="$EVAL_BASE/${corruption}-${SEVERITY}/${SEED_IDX}/"
+  RESULT_JSON="$(posthoc_json_path "$SAVE_EVAL_PATH")"
+
+  if [ -s "$RESULT_JSON" ]; then
+    echo "Posthoc result already exists, skipping: $RESULT_JSON"
+    continue
+  fi
+
   mkdir -p "$SAVE_EVAL_PATH"
 
   echo "Posthoc corruption=$corruption severity=$SEVERITY"
   echo "Logits Path: $LOGITS_PATH"
   echo "Save Eval Path: $SAVE_EVAL_PATH"
+  echo "Expected Result JSON: $RESULT_JSON"
 
   if [ "$DEBUG" = false ]; then
     python ../evaluate_posthoc.py \
