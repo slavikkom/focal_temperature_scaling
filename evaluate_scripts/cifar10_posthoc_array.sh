@@ -7,7 +7,7 @@
 #SBATCH --output=slurm_logs_cifar10/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=03:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
@@ -51,10 +51,10 @@ MODELS=(
   "resnet50_exp_1mp"
   "resnet50_exp_p"
   "resnet50_focal_loss"
-  "resnet50_linear"
-  "resnet50_log_power"
-  "resnet50_one_minus_power"
-  "resnet50_proper_focal_loss"
+  # "resnet50_linear"
+  # "resnet50_log_power"
+  # "resnet50_one_minus_power"
+  # "resnet50_proper_focal_loss"
 )
 
 COMBINATIONS=()
