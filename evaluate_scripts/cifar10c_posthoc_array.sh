@@ -5,7 +5,7 @@
 # sbatch --array=0-<total_jobs_minus_1> cifar10c_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_cf10c
-#SBATCH --output=slurm_logs_cifar10c/posthoc_job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar10c_post/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --time=24:00:00

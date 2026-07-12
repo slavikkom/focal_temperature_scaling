@@ -9,7 +9,7 @@
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=01:30:00
+#SBATCH --time=03:00:00
 #SBATCH --mem=20G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4

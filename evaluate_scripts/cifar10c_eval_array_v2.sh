@@ -12,13 +12,13 @@
 # as with the original version of this script.
 
 #SBATCH --job-name=eval_cf10c
-#SBATCH --output=slurm_logs_cifar10c/eval_job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar10c_missings/eval_job_%A_%a.out
 #SBATCH --partition=gpu
 #SBATCH --nodelist=falcon1,falcon2,falcon3,falcon4,falcon5,falcon6,pegasus,pegasus2
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
-#SBATCH --time=02:00:00
-#SBATCH --mem=20G
+#SBATCH --time=03:00:00
+#SBATCH --mem=15G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=4
 
@@ -55,14 +55,14 @@ KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 CORRUPTIONS=(
-  "brightness"
-  "contrast"
-  "defocus_blur"
-  "elastic_transform"
-  "fog"
-  "frost"
-  "gaussian_blur"
-  "gaussian_noise"
+  # "brightness"
+  # "contrast"
+  # "defocus_blur"
+  # "elastic_transform"
+  # "fog"
+  # "frost"
+  # "gaussian_blur"
+  # "gaussian_noise"
   "glass_blur"
   "impulse_noise"
   "jpeg_compression"
@@ -84,19 +84,20 @@ DEBUG=false # set to true for debugging which won't run the evaluation only to d
 
 DATASET_ROOT="../Data/datasets"
 SAVE_BASE="../MODEL_DIRECTORY/CIFAR10"
-# EVAL_BASE="../RESULTS/CIFAR10C"
-EVAL_BASE="../RESULTS/hpc_results_june26/CIFAR10C_epoch${EPOCH}_with_dirichlet"
+EVAL_BASE="../RESULTS/CIFAR10C_epoch${EPOCH}_with_dirichlet"
+# EVAL_BASE="../RESULTS/hpc_results_june26/CIFAR10C_epoch${EPOCH}_with_dirichlet"
 
 EXPECTED_FILES_LIST="./cifar10c_expected_files.txt"
 MISSING_FILES_LIST="./cifar10c_missing_files.txt"
 MISSING_CONTENT_FILES_LIST="./cifar10c_missing_content_files.txt"
-EVALUATE_LINKS=(softmax exp_p exp_1mp)
+# EVALUATE_LINKS=(softmax focal exp_p exp_1mp)
+EVALUATE_LINKS=(focal)
 
 # Required JSON content for missing-content mode. Leave an array empty to skip
 # that check. Top-level keys are checked directly on the root JSON object.
 # T_DICT links are checked under the top-level "T_dict" object.
 REQUIRED_TOP_LEVEL_KEYS=(dirichlet_calibrated)
-REQUIRED_T_DICT_LINKS=(softmax exp_p exp_1mp)
+REQUIRED_T_DICT_LINKS=(softmax focal exp_p exp_1mp)
 
 mkdir -p "$EVAL_BASE"
 
@@ -321,6 +322,11 @@ run_eval() {
   echo "Evaluating: SEED_IDX=$seed_idx, MODEL=$model_name"
   echo "Evaluating corruption=$corruption severity=$severity"
   echo "Save Eval Path: $save_eval_path"
+
+      # --dirichlet \
+      # --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
+      # --dirichlet-max-iter 1000 \
+      # --dirichlet-n-jobs 1 \
 
   if [ "$DEBUG" = false ]; then
     python ../evaluate.py \
