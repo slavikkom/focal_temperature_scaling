@@ -46,6 +46,13 @@ def parse_args():
     parser.set_defaults(log=False)
     parser.add_argument("--links", nargs="+", default=None,
                         help="Calibration links to evaluate. Omit to evaluate all links.")
+    parser.add_argument("--posthoc-order", choices=["ts_first", "ts_last"],
+                        default="ts_first", dest="posthoc_order",
+                        help=(
+                            "Order for composing temperature scaling with the selected link. "
+                            "ts_first applies link(logits / T); ts_last applies the link first, "
+                            "then softmax(log(link_probs) / T)."
+                        ))
     parser.add_argument("--dirichlet", action="store_true", dest="dirichlet",
                         help="Evaluate full ODIR Dirichlet calibration on softmax probabilities.")
     parser.set_defaults(dirichlet=False)

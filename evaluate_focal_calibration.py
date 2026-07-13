@@ -6,6 +6,7 @@ from sklearn.model_selection import GridSearchCV, StratifiedKFold
 from temperature_scaling import ModelWithTemperature
 from Metrics.metrics import AdaptiveECELoss, SmoothECELoss
 from temperature_scaling import multi_focal_link
+from temperature_scaling import get_probs_with_temperature_order
 from new_links import linear_invlink, multi_link
 from Calibs.fulldirichlet import FullDirichletCalibrator
 
@@ -82,16 +83,14 @@ def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
 
     return epoch_loss
     
-def get_probs(logits, T=1, a=1, link='softmax'):
-    if link == 'softmax':
-        probs = torch.nn.Softmax(dim=1)(logits / T)
-    elif link == 'focal':
-        probs = multi_focal_link(logits / T, a)
-    elif link == 'generalized_focal':
-        probs = multi_link(logits / T, link, a[0], a[1])
-    else:
-        probs = multi_link(logits / T, link, a)
-    return probs
+def get_probs(logits, T=1, a=1, link='softmax', posthoc_order='ts_first'):
+    return get_probs_with_temperature_order(
+        logits,
+        T=T,
+        a=a,
+        link=link,
+        posthoc_order=posthoc_order,
+    )
 
 
 def _probs_to_tensor(probs, device):
@@ -274,7 +273,7 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                                  num_classes=10, device='cuda', train_logits=None,
                                  train_labels=None, links=None,
                                  train_smooth_ece_sample_size=5000,
-                                 seed=1):
+                                 seed=1, posthoc_order='ts_first'):
     if links is None or "all" in links:
         active_link_dict = link_dict
     else:
@@ -327,7 +326,12 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
             else:
                 # Just round the float
                 key = str(round(link_value, 2))
-            scaled_model = ModelWithTemperature(net, a=link_value, link=link_name)
+            scaled_model = ModelWithTemperature(
+                net,
+                a=link_value,
+                link=link_name,
+                posthoc_order=posthoc_order,
+            )
             scaled_model.set_temperature(val_logits, val_labels, cross_validate='ece', device=device)
             T_opt_ce = scaled_model.get_temperature(metric='ce')
             T_opt_ece = scaled_model.get_temperature(metric='ece')
@@ -337,16 +341,19 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
             gamma_dict[link_name][key]["ECE"]  = scaled_model.ece_vals
 
             ### First uncalibrated
-            val_pred = get_probs(val_logits, T=1, a=link_value, link=link_name)
+            val_pred = get_probs(val_logits, T=1, a=link_value, link=link_name,
+                                 posthoc_order=posthoc_order)
             evaluation_metrics['val']['uncalibrated'][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
-            test_pred = get_probs(test_logits, T=1, a=link_value, link=link_name)
+            test_pred = get_probs(test_logits, T=1, a=link_value, link=link_name,
+                                  posthoc_order=posthoc_order)
             evaluation_metrics['test']['uncalibrated'][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
                 
             if train_labels is not None:
                 # TODO: Consider adding an option to have train-fit temeprature as an oracle evaluation
                 # scaled_model.set_temperature(train_logits, train_labels, cross_validate='ece', device=device)
 
-                train_pred = get_probs(train_logits, T=1, a=link_value, link=link_name)
+                train_pred = get_probs(train_logits, T=1, a=link_value, link=link_name,
+                                       posthoc_order=posthoc_order)
                 evaluation_metrics['train']['uncalibrated'][link_name][key] = evaluate(
                     train_labels,
                     train_pred,
@@ -358,7 +365,8 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                 for T_metric in ['ce', 'ece']:
                     # train_T_opt = scaled_model.get_temperature(metric=T_metric)
                     T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
-                    train_pred = get_probs(train_logits, T=T_opt, a=link_value, link=link_name)
+                    train_pred = get_probs(train_logits, T=T_opt, a=link_value, link=link_name,
+                                           posthoc_order=posthoc_order)
                     evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = evaluate(
                         train_labels,
                         train_pred,
@@ -369,14 +377,17 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
 
             for T_metric in ['ce', 'ece']:
                 T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
-                val_pred = get_probs(val_logits, T=T_opt, a=link_value, link=link_name)
+                val_pred = get_probs(val_logits, T=T_opt, a=link_value, link=link_name,
+                                     posthoc_order=posthoc_order)
                 evaluation_metrics['val']['calibrated'][T_metric][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
                 
-                test_pred = get_probs(test_logits, T=T_opt, a=link_value, link=link_name)
+                test_pred = get_probs(test_logits, T=T_opt, a=link_value, link=link_name,
+                                      posthoc_order=posthoc_order)
                 evaluation_metrics['test']['calibrated'][T_metric][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
             
             for T_metric in ['ce', 'ece']:
                 gamma_dict[link_name][key][" T_opt" + " " + T_metric] = T_opt_ce if T_metric == 'ce' else T_opt_ece
     
     evaluation_metrics['T_dict'] = gamma_dict
+    evaluation_metrics['posthoc_order'] = posthoc_order
     return evaluation_metrics

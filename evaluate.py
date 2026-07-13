@@ -136,6 +136,13 @@ def parseArgs():
                         help="Calibration links to evaluate. Choices: all, {}. Omit to evaluate all links.".format(
                             ", ".join(link_dict.keys())
                         ))
+    parser.add_argument("--posthoc-order", choices=["ts_first", "ts_last"],
+                        default="ts_first", dest="posthoc_order",
+                        help=(
+                            "Order for composing temperature scaling with the selected link. "
+                            "ts_first applies link(logits / T); ts_last applies the link first, "
+                            "then softmax(log(link_probs) / T)."
+                        ))
     parser.add_argument("--dirichlet", action="store_true", dest="dirichlet",
                         help="Evaluate full ODIR Dirichlet calibration on softmax probabilities")
     parser.set_defaults(dirichlet=False)
@@ -285,14 +292,15 @@ def format_number_for_filename(value):
     return text if text else "0"
 
 
-def method_name_for_link(link_name, temperature_scaled=False):
+def method_name_for_link(link_name, temperature_scaled=False,
+                         posthoc_order='ts_first'):
     display_name = LINK_DISPLAY_NAMES.get(link_name, link_name)
     if link_name == "softmax":
         method_name = "softmax"
     else:
         method_name = "softmax+{}".format(display_name)
     if temperature_scaled:
-        method_name += "+ts"
+        method_name += "+ts_last" if posthoc_order == "ts_last" else "+ts"
     return method_name
 
 
@@ -321,12 +329,18 @@ def best_link_value_by_val_ce(stats, active_link_dict, link_name, temperature_sc
     return best_key, key_to_value[best_key], best_ce
 
 
-def probability_export_specs_from_stats(stats, active_link_dict, include_dirichlet=False):
+def probability_export_specs_from_stats(stats, active_link_dict,
+                                        include_dirichlet=False,
+                                        posthoc_order='ts_first'):
     specs = []
     for link_name in active_link_dict:
         best_key, best_link_value, best_ce = best_link_value_by_val_ce(
             stats, active_link_dict, link_name, temperature_scaled=False)
-        method_name = method_name_for_link(link_name, temperature_scaled=False)
+        method_name = method_name_for_link(
+            link_name,
+            temperature_scaled=False,
+            posthoc_order=posthoc_order,
+        )
         suffix = "" if link_name == "softmax" else "_{}".format(key_to_filename_token(best_key))
         specs.append({
             "method_name": method_name,
@@ -337,12 +351,17 @@ def probability_export_specs_from_stats(stats, active_link_dict, include_dirichl
             "temperature_metric": "none",
             "val_ce": best_ce,
             "calibrated_on": "none",
+            "posthoc_order": posthoc_order,
         })
 
         best_key, best_link_value, best_ce = best_link_value_by_val_ce(
             stats, active_link_dict, link_name, temperature_scaled=True)
         temperature = stats["T_dict"][link_name][best_key][" T_opt ce"]
-        method_name = method_name_for_link(link_name, temperature_scaled=True)
+        method_name = method_name_for_link(
+            link_name,
+            temperature_scaled=True,
+            posthoc_order=posthoc_order,
+        )
         if link_name == "softmax":
             suffix_parts = [format_number_for_filename(temperature)]
         else:
@@ -359,6 +378,7 @@ def probability_export_specs_from_stats(stats, active_link_dict, include_dirichl
             "temperature_metric": "ce",
             "val_ce": best_ce,
             "calibrated_on": "val",
+            "posthoc_order": posthoc_order,
         })
 
     if include_dirichlet:
@@ -372,6 +392,7 @@ def probability_export_specs_from_stats(stats, active_link_dict, include_dirichl
             "val_ce": None,
             "calibrated_on": "val",
             "dirichlet": True,
+            "posthoc_order": "dirichlet",
         })
     return specs
 
@@ -438,6 +459,7 @@ def save_probability_exports(save_eval_loc, split_logits, split_labels, specs,
                 "temperature_metric": spec["temperature_metric"],
                 "calibrated_on": spec["calibrated_on"],
                 "selection_metric": "val_ce",
+                "posthoc_order": spec["posthoc_order"],
             }
             if spec.get("val_ce") is not None:
                 metadata["val_ce"] = float(spec["val_ce"])
@@ -477,6 +499,7 @@ def save_probability_exports(save_eval_loc, split_logits, split_labels, specs,
                     T=spec["temperature"],
                     a=spec["link_value"],
                     link=spec["link_name"],
+                    posthoc_order=spec["posthoc_order"],
                 )
                 save_probs_labels_indices_npz(
                     filename,
@@ -646,6 +669,7 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
     active_link_dict = get_active_link_dict(args.links)
     probability_export_splits = get_probability_export_splits(args)
     save_any_probs = len(probability_export_splits) > 0
+    posthoc_order = getattr(args, "posthoc_order", "ts_first")
 
     if net is None:
         net = nn.Identity().to(device)
@@ -658,7 +682,8 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
                                           train_labels=train_labels,
                                           links=args.links,
                                           train_smooth_ece_sample_size=train_smooth_ece_sample_size,
-                                          seed=args.seed)
+                                          seed=args.seed,
+                                          posthoc_order=posthoc_order)
     dirichlet_probabilities = None
     needs_dirichlet_probabilities = save_any_probs and args.dirichlet
     if args.dirichlet or needs_dirichlet_probabilities:
@@ -698,6 +723,7 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
             stats,
             active_link_dict,
             include_dirichlet=args.dirichlet,
+            posthoc_order=posthoc_order,
         )
         log_probability_export_specs(probability_export_specs)
         all_split_logits = {

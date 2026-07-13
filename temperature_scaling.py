@@ -115,6 +115,32 @@ def apply_link(logits, link='softmax', a=1):
     return probs
 
 
+def get_probs_ts_first(logits, T=1.0, a=1.0, link='softmax'):
+    return apply_link(logits / T, link=link, a=a)
+
+
+def get_probs_ts_last(logits, T=1.0, a=1.0, link='softmax'):
+    base_probs = apply_link(logits, link=link, a=a)
+
+    eps = torch.finfo(base_probs.dtype).tiny
+    log_base_probs = torch.log(base_probs.clamp_min(eps))
+
+    return torch.softmax(log_base_probs / T, dim=1)
+
+
+def get_probs_with_temperature_order(logits, T=1.0, a=1.0, link='softmax',
+                                     posthoc_order='ts_first'):
+    if posthoc_order == 'ts_first':
+        return get_probs_ts_first(logits, T=T, a=a, link=link)
+    if posthoc_order == 'ts_last':
+        return get_probs_ts_last(logits, T=T, a=a, link=link)
+    raise ValueError(
+        "Unknown posthoc_order '{}'. Expected 'ts_first' or 'ts_last'.".format(
+            posthoc_order
+        )
+    )
+
+
 class ModelWithTemperature(nn.Module):
     """
     A thin decorator, which wraps a model with temperature scaling
@@ -123,7 +149,8 @@ class ModelWithTemperature(nn.Module):
         NB: Output of the neural network should be the classification logits,
             NOT the softmax (or log softmax)!
     """
-    def __init__(self, model, log=True, a=1, link='softmax'):
+    def __init__(self, model, log=True, a=1, link='softmax',
+                 posthoc_order='ts_first'):
         super(ModelWithTemperature, self).__init__()
         self.model = model
         self.temperature = 1.0
@@ -132,6 +159,7 @@ class ModelWithTemperature(nn.Module):
         self.log = log
         self.a = a
         self.link = link
+        self.posthoc_order = posthoc_order
 
 
     def forward(self, input):
@@ -162,7 +190,13 @@ class ModelWithTemperature(nn.Module):
 
         # Calculate NLL and ECE before temperature scaling
         print("Current link parameter is ", self.a)
-        probs = apply_link(logits, link=self.link, a=self.a)
+        probs = get_probs_with_temperature_order(
+            logits,
+            T=1.0,
+            link=self.link,
+            a=self.a,
+            posthoc_order=self.posthoc_order,
+        )
         
         before_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
         before_temperature_ece = ece_criterion(probs, labels).item()
@@ -185,7 +219,13 @@ class ModelWithTemperature(nn.Module):
             self.to(device)
             probs = None
             
-            probs = apply_link(logits / T, link=self.link, a=self.a)
+            probs = get_probs_with_temperature_order(
+                logits,
+                T=T,
+                link=self.link,
+                a=self.a,
+                posthoc_order=self.posthoc_order,
+            )
 
             after_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
             after_temperature_ece = ece_criterion(probs, labels).item()
@@ -212,7 +252,13 @@ class ModelWithTemperature(nn.Module):
         self.to(device)
 
         # Calculate NLL and ECE after temperature scaling
-        probs = apply_link(logits / self.temperature, link=self.link, a=self.a)
+        probs = get_probs_with_temperature_order(
+            logits,
+            T=self.temperature,
+            link=self.link,
+            a=self.a,
+            posthoc_order=self.posthoc_order,
+        )
 
         after_temperature_nll = nll_criterion(torch.log(probs), labels.long()).item()
         after_temperature_ece = ece_criterion(probs, labels).item()
