@@ -240,6 +240,13 @@ Current outputs include:
 - `simplex_density_drift_<rank-window>.png`: density differences between
   splits, currently `val - train` and `test - val`, for the first selected
   probability method.
+- `simplex_val_drift_calibration_correlation_<rank-window>.png`: validation
+  diagnostic with one row per selected probability method, sorted by Spearman
+  correlation between softmax train-to-validation density drift and validation
+  signed top-rank probability change. Columns show softmax density drift,
+  calibration-map displacement, validation signed top-rank calibration change,
+  and a drift-vs-change scatter plot with the Spearman correlation. Use
+  `--only-val-drift-calibration-correlation` to write only this diagnostic.
 - `calibration_map_displacement_<method>.png`: one standalone raw-coordinate
   calibration-map displacement plot for each selected probability method.
 - `link_barycentric_fields.png`, `link_slice.png`, and `link_displacement.png`:
@@ -275,6 +282,16 @@ python analysis_scripts/analyze_logits_probs.py \
   --output-dir analysis_scripts/logit_prob_visualizations_cifar10_42 \
   --topk-offset 2 \
   --methods softmax softmax+ts_2.55 softmax+exp1mp+ts_2+1.9
+```
+
+Write only the validation drift/calibration correlation diagnostic:
+
+```bash
+python analysis_scripts/analyze_logits_probs.py \
+  --input-dir RESULTS/CIFAR10_LOGITSLABELSPROBS/42 \
+  --output-dir analysis_scripts/logit_prob_visualizations_cifar10_42 \
+  --topk-offset 2 \
+  --only-val-drift-calibration-correlation
 ```
 
 Analyze a logits-only export directory:
