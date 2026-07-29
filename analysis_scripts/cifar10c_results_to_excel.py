@@ -1,14 +1,20 @@
 #!/usr/bin/env python
 """
-Create an Excel workbook summarizing CIFAR-10-C evaluation results.
+Create an Excel workbook summarizing corruption/severity evaluation results.
 
 The expected result layout is:
 
     RESULTS/CIFAR10C/<corruption>-<severity>/<seed>/<result-file>.json
 
+Clean-only datasets can be exported with --severities 0 and a directory laid
+out as:
+
+    RESULTS/TINYIMAGENET_epoch100/<seed>/<result-file>.json
+
 Each corruption worksheet contains metric tables with severities as columns and
 model/loss variants as rows. The Summary worksheet averages each metric across
-all corruption types for each severity.
+all corruption types for each severity, or shows the clean seed aggregate for
+clean-only exports.
 """
 
 from __future__ import annotations
@@ -51,7 +57,9 @@ APPROACH_PATTERNS = (
     {
         "loss": "cross_entropy",
         "display": "Cross-Entropy",
-        "regex": re.compile(r"^(?P<prefix>resnet50_)?cross_entropy_(?P<epoch>\d+)\.json$"),
+        "regex": re.compile(
+            r"^(?P<prefix>resnet50(?:_ti)?_)?cross_entropy_(?P<epoch>\d+)\.json$"
+        ),
         "clean_file": "{prefix}cross_entropy_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
@@ -61,7 +69,7 @@ APPROACH_PATTERNS = (
         "loss": "cross_entropy_label_smoothing",
         "display": "Cross-Entropy label_smoothing={param:g}",
         "regex": re.compile(
-            r"^(?P<prefix>resnet50_)?cross_entropy_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"
+            r"^(?P<prefix>resnet50(?:_ti)?_)?cross_entropy_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"
         ),
         "clean_file": "{prefix}cross_entropy_{param}_{epoch}.json",
         "metric_link_name": "softmax",
@@ -71,7 +79,9 @@ APPROACH_PATTERNS = (
     {
         "loss": "brier_score",
         "display": "Brier Score",
-        "regex": re.compile(r"^(?P<prefix>resnet50_)?brier_score_(?P<epoch>\d+)\.json$"),
+        "regex": re.compile(
+            r"^(?P<prefix>resnet50(?:_ti)?_)?brier_score_(?P<epoch>\d+)\.json$"
+        ),
         "clean_file": "{prefix}brier_score_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
@@ -98,8 +108,10 @@ APPROACH_PATTERNS = (
     {
         "loss": "linear_loss",
         "display": "Linear beta={param:g}",
-        "regex": re.compile(r"^resnet50_linear_beta_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"),
-        "clean_file": "resnet50_linear_beta_{param}_{epoch}.json",
+        "regex": re.compile(
+            r"^(?P<prefix>resnet50_|ti_)linear_beta_(?P<param>[0-9.]+)_(?P<epoch>\d+)\.json$"
+        ),
+        "clean_file": "{prefix}linear_beta_{param}_{epoch}.json",
         "metric_link_name": "softmax",
         "metric_link_value": 1.0,
         "sort": 2,
@@ -161,24 +173,28 @@ AGGREGATED_FIELDS = (
 _CORRUPTION_INDEX_CACHE = {}
 _SUMMARY_METRIC_INDEX_CACHE = {}
 _SUMMARY_TEMPERATURE_INDEX_CACHE = {}
+CLEAN_RESULTS_LABEL = "Clean"
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Export CIFAR-10-C corruption/severity results to Excel."
+        description="Export corruption/severity or clean-only results to Excel."
     )
     parser.add_argument(
         "--results-dir",
         type=Path,
         default=DEFAULT_RESULTS_DIR,
-        help=f"Directory containing CIFAR-10-C results. Default: {DEFAULT_RESULTS_DIR}",
+        help=(
+            "Directory containing corrupted results, or clean results when "
+            f"--severities 0 is used. Default: {DEFAULT_RESULTS_DIR}"
+        ),
     )
     parser.add_argument(
         "--clean-results-dir",
         type=Path,
         default=DEFAULT_CLEAN_RESULTS_DIR,
         help=(
-            "Directory containing non-corrupted CIFAR-10 results used as severity 0. "
+            "Directory containing non-corrupted results used as severity 0. "
             f"Default: {DEFAULT_CLEAN_RESULTS_DIR}"
         ),
     )
@@ -287,6 +303,22 @@ def resolve_output_path(path: Path) -> Path:
         return cwd_path
 
     return (REPO_ROOT / path).resolve()
+
+
+def infer_dataset_label(*paths: Path) -> str:
+    for path in paths:
+        for part in reversed(path.parts):
+            normalized = re.sub(r"[^A-Za-z0-9]", "", part)
+            match = re.search(r"cifar(?P<num>\d+)c", normalized, flags=re.IGNORECASE)
+            if match is not None:
+                return f"CIFAR-{match.group('num')}-C"
+            if "TINYIMAGENET" in normalized.upper():
+                return "TinyImageNet"
+    return "CIFAR-10-C"
+
+
+def is_clean_only(severities: Iterable[int]) -> bool:
+    return set(severities) == {0}
 
 
 def parse_corruption_dir(path: Path) -> tuple[str, int] | None:
@@ -1119,27 +1151,30 @@ def metric_table_for_corruption(
                     continue
                 row[column_name] = format_metric_from_row(test_row, metric_name, fmt)
 
-        corrupted_severities = [severity for severity in severities if severity != 0]
-        corrupted_rows = [
-            index_lookup(indexed, (approach, "test", severity))
-            for severity in corrupted_severities
-        ]
-        overall_rows = [
-            index_lookup(indexed, (approach, "test", severity))
-            for severity in severities
-        ]
-        if separate_std_columns:
-            set_mean_std_columns(
-                row,
-                "Overall Corrupted",
-                *overall_values_from_rows(corrupted_rows, metric_name),
-            )
-            set_mean_std_columns(
-                row, "Overall", *overall_values_from_rows(overall_rows, metric_name)
-            )
-        else:
-            row["Overall Corrupted"] = format_overall_from_rows(corrupted_rows, metric_name, fmt)
-            row["Overall"] = format_overall_from_rows(overall_rows, metric_name, fmt)
+        if not is_clean_only(severities):
+            corrupted_severities = [severity for severity in severities if severity != 0]
+            corrupted_rows = [
+                index_lookup(indexed, (approach, "test", severity))
+                for severity in corrupted_severities
+            ]
+            overall_rows = [
+                index_lookup(indexed, (approach, "test", severity))
+                for severity in severities
+            ]
+            if separate_std_columns:
+                set_mean_std_columns(
+                    row,
+                    "Overall Corrupted",
+                    *overall_values_from_rows(corrupted_rows, metric_name),
+                )
+                set_mean_std_columns(
+                    row, "Overall", *overall_values_from_rows(overall_rows, metric_name)
+                )
+            else:
+                row["Overall Corrupted"] = format_overall_from_rows(
+                    corrupted_rows, metric_name, fmt
+                )
+                row["Overall"] = format_overall_from_rows(overall_rows, metric_name, fmt)
         rows.append(row)
     return pd.DataFrame(rows)
 
@@ -1156,7 +1191,9 @@ def metric_table_for_summary(
     rows = []
     metric_index = summary_metric_index(summary_df, metric_name)
     temp_index = summary_temperature_index(summary_df)
-    columns = [*severities, "Overall Corrupted", "Overall"]
+    columns = [*severities]
+    if not is_clean_only(severities):
+        columns.extend(["Overall Corrupted", "Overall"])
     first_severity = first_table_severity(severities)
 
     for approach in approaches:
@@ -1269,6 +1306,8 @@ def write_workbook(
     severities: list[int],
     args: argparse.Namespace,
     warnings: list[str],
+    dataset_label: str,
+    clean_only: bool,
 ) -> None:
     approach_order = selected_df["approach_calibration"].tolist()
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1293,11 +1332,21 @@ def write_workbook(
                 f"Metrics are read from link '{args.metric_link_name}' "
                 f"with fixed value {args.metric_link_value:g}."
             )
+        summary_mean_note = (
+            "Values are mean +/- std across seeds. "
+            if clean_only
+            else "Values are mean +/- std across corruption-level means. "
+        )
+        test_columns_note = (
+            "The severity 0 column shows test. "
+            if clean_only
+            else "Severity columns show test only. "
+        )
         summary_note = (
-            "Values are mean +/- std across corruption-level means. "
+            f"{summary_mean_note}"
             "smECE sigma is the adaptive bandwidth selected for smECE; "
             "smECE 0.05 uses the fixed bandwidth. "
-            "Train and validation are shown in separate columns; severity columns show test only. "
+            f"Train and validation are shown in separate columns; {test_columns_note}"
             "Rows are selected by lowest validation Logloss within each loss family and calibration state. "
             f"Calibrated rows use {args.cal_criteria.upper()}-selected temperature scaling. "
             f"{metric_link_note} "
@@ -1313,30 +1362,50 @@ def write_workbook(
             f"{metric_link_note} "
             "Dirichlet rows use softmax full ODIR with selected lambda and mu."
         )
-        summary_tables = [
-            (
-                metric_name,
-                metric_table_for_summary(
-                    summary_df,
+        if clean_only:
+            summary_tables = [
+                (
                     metric_name,
-                    fmt,
-                    approach_order,
-                    severities,
-                    args.splits,
-                    args.separate_std_columns,
-                ),
-            )
-            for metric_name, _, _, fmt in METRICS
-        ]
+                    metric_table_for_corruption(
+                        agg_df,
+                        metric_name,
+                        fmt,
+                        approach_order,
+                        severities,
+                        args.splits,
+                        CLEAN_RESULTS_LABEL,
+                        args.separate_std_columns,
+                    ),
+                )
+                for metric_name, _, _, fmt in METRICS
+            ]
+            summary_title = f"{dataset_label} clean results"
+        else:
+            summary_tables = [
+                (
+                    metric_name,
+                    metric_table_for_summary(
+                        summary_df,
+                        metric_name,
+                        fmt,
+                        approach_order,
+                        severities,
+                        args.splits,
+                        args.separate_std_columns,
+                    ),
+                )
+                for metric_name, _, _, fmt in METRICS
+            ]
+            summary_title = f"Average across {dataset_label} corruptions"
         write_metric_blocks(
             writer,
             "Summary",
             summary_tables,
-            "Average across CIFAR-10-C corruptions",
+            summary_title,
             summary_note,
         )
 
-        for corruption in corruptions:
+        for corruption in ([] if clean_only else corruptions):
             tables = [
                 (
                     metric_name,
@@ -1377,25 +1446,40 @@ def main() -> None:
     results_dir = resolve_existing_path(args.results_dir)
     clean_results_dir = resolve_existing_path(args.clean_results_dir)
     output_path = resolve_output_path(args.output)
+    severities = sorted(args.severities)
+    clean_only = is_clean_only(severities)
 
-    if not results_dir.exists():
+    if (
+        clean_only
+        and args.clean_results_dir == DEFAULT_CLEAN_RESULTS_DIR
+        and args.results_dir != DEFAULT_RESULTS_DIR
+    ):
+        clean_results_dir = results_dir
+
+    dataset_label = infer_dataset_label(clean_results_dir, results_dir, output_path)
+
+    if not clean_only and not results_dir.exists():
         raise FileNotFoundError(f"Results directory does not exist: {results_dir}")
     if 0 in args.severities and not clean_results_dir.exists():
         raise FileNotFoundError(f"Clean results directory does not exist: {clean_results_dir}")
 
-    severities = sorted(args.severities)
     seeds = sorted(args.seeds)
-    corruptions = discover_corruptions(results_dir, severities)
+    corruptions = [CLEAN_RESULTS_LABEL] if clean_only else discover_corruptions(
+        results_dir, severities
+    )
+    approach_discovery_dir = clean_results_dir if clean_only else results_dir
     approaches = discover_approaches(
-        results_dir,
+        approach_discovery_dir,
         metric_link_name=args.metric_link_name,
         metric_link_value=args.metric_link_value,
     )
 
     if not corruptions:
-        raise RuntimeError(f"No CIFAR-10-C corruption directories found in {results_dir}")
+        raise RuntimeError(f"No {dataset_label} corruption directories found in {results_dir}")
     if not approaches:
-        raise RuntimeError(f"No known CIFAR-10-C result JSON files found in {results_dir}")
+        raise RuntimeError(
+            f"No known {dataset_label} result JSON files found in {approach_discovery_dir}"
+        )
 
     selection_severity = next((severity for severity in severities if severity != 0), severities[0])
     selection_severities = [selection_severity]
@@ -1454,6 +1538,8 @@ def main() -> None:
         severities=severities,
         args=args,
         warnings=warnings,
+        dataset_label=dataset_label,
+        clean_only=clean_only,
     )
 
     print(f"Wrote {output_path}")
@@ -1468,7 +1554,10 @@ def main() -> None:
         print(f"Metric link: {args.metric_link_name} ({args.metric_link_value:g})")
     print(f"Approaches: {', '.join(approach.approach for approach in approaches)}")
     print(f"Selected rows: {len(selected_df)}")
-    print(f"Corruptions: {len(corruptions)}")
+    if clean_only:
+        print("Mode: clean results only")
+    else:
+        print(f"Corruptions: {len(corruptions)}")
     print(f"Rows read: {len(raw_df)}")
     if warnings:
         print(f"Warnings: {len(warnings)} (also written to the Warnings sheet)")
