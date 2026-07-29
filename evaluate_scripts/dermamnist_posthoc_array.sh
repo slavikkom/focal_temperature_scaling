@@ -4,10 +4,10 @@
 # sbatch --array=0-<total_jobs_minus_1> dermamnist_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_derma
-#SBATCH --output=slurm_logs_dermamnist_lr05/posthoc_job_%A_%a.out
+#SBATCH --output=slurm_logs_dermamnist_lr05_july17/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=00:30:00
+#SBATCH --time=06:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
@@ -36,8 +36,11 @@ GPU_FLAG=""
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/DERMAMNIST_LR05_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/july26/DERMAMNIST_LR05_POSTHOC_epoch${EPOCH}"
-EVALUATE_LINKS=(softmax focal exp_p exp_1mp)
+# EVAL_BASE="../RESULTS/july26/DERMAMNIST_LR05_POSTHOC_epoch${EPOCH}"
+# EVAL_BASE="../RESULTS/july26/DERMAMNIST_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}"
+EVAL_BASE="../RESULTS/july26/DERMAMNIST_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
+# EVALUATE_LINKS=(softmax focal exp_p exp_1mp )
+EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
 DIRICHLET_ARG="
   --dirichlet \
   --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
@@ -49,12 +52,12 @@ MODELS=(
   "resnet18_cross_entropy"
   "resnet18_brier_score"
   "resnet18_focal_loss"
-  "resnet18_proper_focal_loss"
+  # "resnet18_proper_focal_loss"
   "resnet18_exp_1mp"
   "resnet18_exp_p"
-  "resnet18_linear"
-  "resnet18_log_power"
-  "resnet18_one_minus_power"
+  # "resnet18_linear"
+  # "resnet18_log_power"
+  # "resnet18_one_minus_power"
 )
 
 COMBINATIONS=()
@@ -149,6 +152,7 @@ if [ "$DEBUG" = false ]; then
     --model-name resnet18 \
     --saved_model_name "$MODEL_FILE" \
     -log \
+    --posthoc-order ts_last \
     $GPU_FLAG \
     $SMOKE_ARG \
     --links "${EVALUATE_LINKS[@]}" \

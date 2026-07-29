@@ -47,10 +47,10 @@ MODELS=(
   # "resnet50_focal_loss_adaptive"
   "resnet50_focal_loss"
   # "resnet50_generalized_focal"
-  "resnet50_linear"
-  "resnet50_log_power"
-  "resnet50_one_minus_power"
-  "resnet50_proper_focal_loss"
+  # "resnet50_linear"
+  # "resnet50_log_power"
+  # "resnet50_one_minus_power"
+  # "resnet50_proper_focal_loss"
 )
 
 # Build combinations
@@ -162,6 +162,7 @@ if [ "$DEBUG" = false ]; then
   python ../evaluate.py \
     --dataset cifar10 \
     --model resnet50 \
+    --dirichlet \
     -log \
     $GPU_FLAG \
     $SMOKE_ARG \

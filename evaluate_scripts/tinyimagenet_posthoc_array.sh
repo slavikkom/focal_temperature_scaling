@@ -4,10 +4,10 @@
 # sbatch --array=0-<total_jobs_minus_1> tinyimagenet_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_ti
-#SBATCH --output=slurm_logs_tinyimagenet/posthoc_job_%A_%a.out
+#SBATCH --output=slurm_logs_tinyimagenet_july17/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=03:00:00
+#SBATCH --time=06:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
@@ -36,8 +36,9 @@ GPU_FLAG="" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/TINYIMAGENET_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/july26/TINYIMAGENET_POSTHOC_epoch${EPOCH}"
-EVALUATE_LINKS=(softmax focal exp_p exp_1mp) #(all)
+EVAL_BASE="../RESULTS/july26/TINYIMAGENET_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}"
+# EVAL_BASE="../RESULTS/july26/TINYIMAGENET_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
+EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
 DIRICHLET_ARG="
   --dirichlet \
   --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
@@ -147,6 +148,7 @@ if [ "$DEBUG" = false ]; then
     --model resnet50_ti \
     --model-name resnet50_ti \
     --saved_model_name "$MODEL_FILE" \
+    --posthoc-order ts_first \
     -log \
     $GPU_FLAG \
     $SMOKE_ARG \

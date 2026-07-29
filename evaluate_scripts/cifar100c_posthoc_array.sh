@@ -5,13 +5,13 @@
 # sbatch --array=0-<total_jobs_minus_1> cifar100c_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_cf100c
-#SBATCH --output=slurm_logs_cifar100c_post/posthoc_job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar100c_post_july17/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
-#SBATCH --time=24:00:00
+#SBATCH --time=48:00:00
 #SBATCH --mem=12G
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=2
+#SBATCH --cpus-per-task=4
 
 source ~/.bashrc
 if command -v conda >/dev/null 2>&1; then
@@ -60,8 +60,11 @@ GPU_FLAG="" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/CIFAR100C_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/july26/CIFAR100C_POSTHOC_epoch${EPOCH}"
-EVALUATE_LINKS=(softmax focal exp_p exp_1mp) #(all)
+# EVAL_BASE="../RESULTS/july26/CIFAR100C_POSTHOC_epoch${EPOCH}"
+# EVAL_BASE="../RESULTS/july26/CIFAR100C_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}"
+EVAL_BASE="../RESULTS/july26/CIFAR100C_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
+# EVALUATE_LINKS=(softmax focal exp_p exp_1mp) #(all)
+EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
 DIRICHLET_ARG="
   --dirichlet \
   --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
@@ -215,6 +218,7 @@ for corruption in "${CORRUPTIONS[@]}"; do
       --model-name resnet50 \
       --saved_model_name "$MODEL_FILE" \
       -log \
+      --posthoc-order ts_last \
       $GPU_FLAG \
       $SMOKE_ARG \
       --links "${EVALUATE_LINKS[@]}" \
