@@ -10,6 +10,7 @@ import json
 import math
 import os
 from pathlib import Path
+from pathlib import PureWindowsPath
 import tempfile
 import time
 
@@ -158,7 +159,7 @@ def json_safe(value):
 
 
 def write_json(path, value):
-    """Atomically publish complete results, including after interrupted runs."""
+    """Atomically publish compact, single-line JSON without reducing precision."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = None
@@ -166,12 +167,48 @@ def write_json(path, value):
         with tempfile.NamedTemporaryFile(mode="w", dir=path.parent,
                                          suffix=".tmp", delete=False) as output:
             temporary = output.name
-            json.dump(json_safe(value), output, indent=2, allow_nan=False)
+            json.dump(json_safe(value), output, separators=(",", ":"), allow_nan=False)
             output.write("\n")
         os.replace(temporary, path)
     finally:
         if temporary is not None and os.path.exists(temporary):
             os.unlink(temporary)
+
+
+def saved_path(value):
+    """Represent paths without disclosing the workstation/HPC directory prefix."""
+    project = Path(__file__).resolve().parent
+    text = os.fspath(value).replace("\\", "/")
+    # Imported metadata may refer to a different checkout on an HPC system.
+    parts = text.split("/")
+    if project.name in parts:
+        project_index = len(parts) - 1 - parts[::-1].index(project.name)
+        relative = Path(*parts[project_index + 1:])
+        if ".." not in relative.parts:
+            return relative.as_posix()
+    if PureWindowsPath(text).is_absolute():
+        return "<external>/" + PureWindowsPath(text).name
+    absolute = Path(os.path.abspath(Path(text).expanduser()))
+    try:
+        return absolute.relative_to(project).as_posix()
+    except ValueError:
+        # Outside-project inputs cannot be represented relative to the project
+        # without revealing parent directories. Content hashes still identify them.
+        return "<external>/" + absolute.name
+
+
+def sanitize_saved_paths(value, key=""):
+    """Remove absolute paths even from nested, copied source metadata/CLI args."""
+    if isinstance(value, dict):
+        return {k: sanitize_saved_paths(v, k) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [sanitize_saved_paths(v, key) for v in value]
+    if isinstance(value, str):
+        path_key = key in {"path", "manifest", "checkpoint", "filename", "saved_model_name"} or key.endswith(("_path", "_root", "_loc"))
+        absolute = value.startswith(("/", "~", "\\")) or PureWindowsPath(value).is_absolute()
+        if absolute or (path_key and ("/" in value or "\\" in value)):
+            return saved_path(value)
+    return value
 
 
 def experiment_identity(args, metadata, device, sizes, active_links):
@@ -186,8 +223,8 @@ def experiment_identity(args, metadata, device, sizes, active_links):
                   "new_links.py", "Metrics/metrics.py"]
     code_files += [str(p.relative_to(code_root)) for p in
                    sorted((code_root / "Calibs").glob("*.py")) if not p.name.startswith("test_")]
-    return json_safe({
-        "version": 1, "sources": sources, "source_metadata": metadata,
+    return json_safe(sanitize_saved_paths({
+        "version": 2, "sources": sources, "source_metadata": metadata,
         "code_sha256": {name: sha256(code_root / name) for name in code_files},
         "dataset": args.dataset, "model": args.model, "model_name": args.model_name,
         "checkpoint": args.saved_model_name, "model_seed": args.seed,
@@ -202,7 +239,7 @@ def experiment_identity(args, metadata, device, sizes, active_links):
         "device": str(device), "torch": torch.__version__,
         "numpy": np.__version__, "sklearn": sklearn.__version__,
         "torch_num_threads": torch.get_num_threads(),
-    })
+    }))
 
 
 def unavailable(reason):
@@ -327,7 +364,7 @@ def run_calibration_size_sweep(args, metadata, device, load_split=None):
             if reason:
                 rows = np.array([], dtype=np.int64)
             run_meta = {
-                "experiment_sha256": fingerprint, "manifest": str(manifest_path.resolve()),
+                "experiment_sha256": fingerprint, "manifest": saved_path(manifest_path),
                 "model_seed": args.seed, "subset_seed": seed,
                 "fit_seed": args.seed if full else seed,
                 "requested_size": size, "actual_size": len(rows), "pool_size": pool_size,
