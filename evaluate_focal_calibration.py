@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
+from functools import partial
 from sklearn.model_selection import GridSearchCV, StratifiedKFold
 
 from temperature_scaling import ModelWithTemperature
@@ -49,7 +50,18 @@ def _sample_metric_inputs(y_true, probs, sample_size=None, seed=1):
 
 
 def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
-             smooth_ece_sample_seed=1):
+             smooth_ece_sample_seed=1, metrics=None):
+    # Keep the historical output by default. Sweeps avoid expensive smooth ECE.
+    if metrics is not None:
+        unknown = set(metrics) - {'CE', 'ECE'}
+        if unknown:
+            raise ValueError('Unsupported restricted metrics: {}'.format(sorted(unknown)))
+        result = {}
+        if 'CE' in metrics:
+            result['CE'] = nn.NLLLoss()(torch.log(probs), y_true.long()).item()
+        if 'ECE' in metrics:
+            result['ECE'] = AdaptiveECELoss(return_stats=True)(probs, y_true.long())
+        return result
     
     epoch_loss = {}
         
@@ -152,7 +164,8 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
                                      reg_grid=None, cv_folds=3, max_iter=1024,
                                      n_jobs=1, seed=1, smoke_test=False,
                                      return_probabilities=False,
-                                     train_smooth_ece_sample_size=5000):
+                                     train_smooth_ece_sample_size=5000, metrics=None):
+    score = partial(evaluate, metrics=metrics)
     if reg_grid is None:
         reg_grid = [1e-1, 1e-2, 1e-3, 1e-4, 1e-5]
 
@@ -240,8 +253,8 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
 
     val_cal_probs = _probs_to_tensor(estimator.predict_proba(val_probs_cv), device)
     test_cal_probs = _probs_to_tensor(estimator.predict_proba(test_probs_cv), device)
-    result["val"] = evaluate(val_labels, val_cal_probs, num_classes=num_classes)
-    result["test"] = evaluate(test_labels, test_cal_probs, num_classes=num_classes)
+    result["val"] = score(val_labels, val_cal_probs, num_classes=num_classes)
+    result["test"] = score(test_labels, test_cal_probs, num_classes=num_classes)
     probabilities = {
         "val": val_cal_probs,
         "test": test_cal_probs,
@@ -251,7 +264,7 @@ def dirichlet_calibration_evaluation(val_logits, val_labels, test_logits, test_l
         train_probs = get_probs(train_logits, T=1, a=1, link='softmax')
         train_probs_cv = _to_numpy_array(train_probs)
         train_cal_probs = _probs_to_tensor(estimator.predict_proba(train_probs_cv), device)
-        result["train"] = evaluate(
+        result["train"] = score(
             train_labels,
             train_cal_probs,
             num_classes=num_classes,
@@ -273,7 +286,8 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                                  num_classes=10, device='cuda', train_logits=None,
                                  train_labels=None, links=None,
                                  train_smooth_ece_sample_size=5000,
-                                 seed=1, posthoc_order='ts_first'):
+                                 seed=1, posthoc_order='ts_first', metrics=None):
+    score = partial(evaluate, metrics=metrics)
     if links is None or "all" in links:
         active_link_dict = link_dict
     else:
@@ -343,10 +357,10 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
             ### First uncalibrated
             val_pred = get_probs(val_logits, T=1, a=link_value, link=link_name,
                                  posthoc_order=posthoc_order)
-            evaluation_metrics['val']['uncalibrated'][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
+            evaluation_metrics['val']['uncalibrated'][link_name][key] = score(val_labels, val_pred, num_classes=num_classes)
             test_pred = get_probs(test_logits, T=1, a=link_value, link=link_name,
                                   posthoc_order=posthoc_order)
-            evaluation_metrics['test']['uncalibrated'][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
+            evaluation_metrics['test']['uncalibrated'][link_name][key] = score(test_labels, test_pred, num_classes=num_classes)
                 
             if train_labels is not None:
                 # TODO: Consider adding an option to have train-fit temeprature as an oracle evaluation
@@ -354,7 +368,7 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
 
                 train_pred = get_probs(train_logits, T=1, a=link_value, link=link_name,
                                        posthoc_order=posthoc_order)
-                evaluation_metrics['train']['uncalibrated'][link_name][key] = evaluate(
+                evaluation_metrics['train']['uncalibrated'][link_name][key] = score(
                     train_labels,
                     train_pred,
                     num_classes=num_classes,
@@ -367,7 +381,7 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                     T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
                     train_pred = get_probs(train_logits, T=T_opt, a=link_value, link=link_name,
                                            posthoc_order=posthoc_order)
-                    evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = evaluate(
+                    evaluation_metrics['train']['calibrated'][T_metric][link_name][key] = score(
                         train_labels,
                         train_pred,
                         num_classes=num_classes,
@@ -379,11 +393,11 @@ def focal_calibration_evaluation(net, val_logits, val_labels, test_logits, test_
                 T_opt = T_opt_ce if T_metric == 'ce' else T_opt_ece
                 val_pred = get_probs(val_logits, T=T_opt, a=link_value, link=link_name,
                                      posthoc_order=posthoc_order)
-                evaluation_metrics['val']['calibrated'][T_metric][link_name][key] = evaluate(val_labels, val_pred, num_classes=num_classes)
+                evaluation_metrics['val']['calibrated'][T_metric][link_name][key] = score(val_labels, val_pred, num_classes=num_classes)
                 
                 test_pred = get_probs(test_logits, T=T_opt, a=link_value, link=link_name,
                                       posthoc_order=posthoc_order)
-                evaluation_metrics['test']['calibrated'][T_metric][link_name][key] = evaluate(test_labels, test_pred, num_classes=num_classes)
+                evaluation_metrics['test']['calibrated'][T_metric][link_name][key] = score(test_labels, test_pred, num_classes=num_classes)
             
             for T_metric in ['ce', 'ece']:
                 gamma_dict[link_name][key][" T_opt" + " " + T_metric] = T_opt_ce if T_metric == 'ce' else T_opt_ece
