@@ -48,7 +48,7 @@ EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_pow
 # DIRICHLET_ARG=""
 DIRICHLET_ARG="
   --dirichlet \
-  --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
+  --dirichlet-reg-grid 1 1e-1 1e-2 1e-3 1e-4 1e-5 \
   --dirichlet-max-iter 1000 \
   --dirichlet-n-jobs 1 \
 "
@@ -136,9 +136,9 @@ IFS='|' read -r SEED_IDX MODEL PARAM1 PARAM2 <<< "$entry"
 
 # Reuse these subset seeds for every trained loss configuration of a model seed.
 case "$SEED_IDX" in
-  42) SUBSET_SEEDS=(1001 1002 1003) ;;
-  123) SUBSET_SEEDS=(1004 1005 1006) ;;
-  2023) SUBSET_SEEDS=(1007 1008 1009) ;;
+  42) SUBSET_SEEDS=(1001 1002 1003 1010 1011) ;;
+  123) SUBSET_SEEDS=(1004 1005 1006 1012 1013) ;;
+  2023) SUBSET_SEEDS=(1007 1008 1009 1014 1015) ;;
   *) echo "Configure SUBSET_SEEDS for model seed $SEED_IDX"; exit 1 ;;
 esac
 
