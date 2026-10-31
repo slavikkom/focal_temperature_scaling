@@ -12,6 +12,20 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=2
 
+# Calibration mode (environment overrides are supported).
+# Temperature order applies only to our own method, not Dirichlet or SMS.
+POSTHOC_ORDER=${POSTHOC_ORDER:-ts_first} # ts_first or ts_last
+SMS_ONLY=${SMS_ONLY:-true} # true: SMS with softmax baselines; false: links and Dirichlet
+case "$POSTHOC_ORDER" in
+  ts_first) TEMPERATURE_ORDER=FIRST ;;
+  ts_last) TEMPERATURE_ORDER=LAST ;;
+  *) echo "Invalid POSTHOC_ORDER: $POSTHOC_ORDER (use ts_first or ts_last)"; exit 1 ;;
+esac
+case "$SMS_ONLY" in
+  true|false) ;;
+  *) echo "Invalid SMS_ONLY: $SMS_ONLY (use true or false)"; exit 1 ;;
+esac
+
 source ~/.bashrc
 if command -v conda >/dev/null 2>&1; then
   eval "$(conda shell.bash hook)"
@@ -26,8 +40,7 @@ export OPENBLAS_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 SEED_DIRS=(42 123 2023)
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
-# GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
-GAMMAS=(2.0)
+GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 # LABEL_SMOOTHING_VALUES=()
@@ -37,33 +50,38 @@ SMOKE_ARG="" # Set to "--smoke-test" for one fixed-strength SMS fit without CV.
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}"
-EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/SMS_CIFAR10_POSTHOC_epoch${EPOCH}}"
-# EVAL_BASE="../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
-# EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
-EVALUATE_LINKS=(softmax) #(all)
+if [ "$SMS_ONLY" = true ]; then
+  EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/SMS_ONLY_CIFAR10_POSTHOC_epoch${EPOCH}}"
+  EVALUATE_LINKS=(softmax)
+  DIRICHLET_ARG=""
+  SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
+else
+  EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_${TEMPERATURE_ORDER}_epoch${EPOCH}}"
+  EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power)
+  DIRICHLET_ARG="--dirichlet --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 --dirichlet-max-iter 1000 --dirichlet-n-jobs 1"
+  SMS_ARG=""
+fi
 
-# DIRICHLET_ARG=""
-# DIRICHLET_ARG="
-#   --dirichlet \
-#   --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
-#   --dirichlet-max-iter 1000 \
-#   --dirichlet-n-jobs 1 \
-# "
-
-# Set SMS_ARG="" to omit Structured Matrix Scaling.
-SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
-
-MODELS=(
-  "resnet50_cross_entropy"
-  "resnet50_brier_score"
-  # "resnet50_exp_1mp"
-  # "resnet50_exp_p"
-  "resnet50_focal_loss"
-  # "resnet50_linear"
-  # "resnet50_log_power"
-  # "resnet50_one_minus_power"
-  # "resnet50_proper_focal_loss"
-)
+# Configure the training losses independently for each calibration mode.
+if [ "$SMS_ONLY" = true ]; then
+  MODELS=(
+    "resnet50_cross_entropy"
+    "resnet50_brier_score"
+    "resnet50_focal_loss"
+  )
+else
+  MODELS=(
+    "resnet50_cross_entropy"
+    "resnet50_brier_score"
+    "resnet50_exp_1mp"
+    "resnet50_exp_p"
+    "resnet50_focal_loss"
+    "resnet50_linear"
+    "resnet50_log_power"
+    "resnet50_one_minus_power"
+    # "resnet50_proper_focal_loss"
+  )
+fi
 
 COMBINATIONS=()
 for seed_idx in "${SEED_DIRS[@]}"; do
@@ -157,7 +175,7 @@ if [ "$DEBUG" = false ]; then
     --model-name resnet50 \
     --saved_model_name "$MODEL_FILE" \
     -log \
-    --posthoc-order ts_first \
+    --posthoc-order "$POSTHOC_ORDER" \
     $SMOKE_ARG \
     --links "${EVALUATE_LINKS[@]}" \
     $DIRICHLET_ARG \
