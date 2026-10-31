@@ -14,3 +14,4 @@ dependencies:
     - matplotlib
     - seaborn
     - scikit-learn
+    - pytorch-minimize==0.1.0
