@@ -4,7 +4,7 @@
 # sbatch --array=0-<total_jobs_minus_1> cifar10_posthoc_array.sh
 
 #SBATCH --job-name=posthoc_cf10
-#SBATCH --output=slurm_logs_cifar10_july17/posthoc_job_%A_%a.out
+#SBATCH --output=slurm_logs_cifar10_oct31/posthoc_job_%A_%a.out
 #SBATCH --partition=main
 #SBATCH --nodes=1
 #SBATCH --time=06:00:00
@@ -26,27 +26,29 @@ export OPENBLAS_NUM_THREADS="$SLURM_CPUS_PER_TASK"
 SEED_DIRS=(42 123 2023)
 ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
-GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+# GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
+GAMMAS=(2.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
+# LABEL_SMOOTHING_VALUES=()
 
 EPOCH=350
 SMOKE_ARG="" # Set to "--smoke-test" for one fixed-strength SMS fit without CV.
-GPU_FLAG="-g" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}"
-EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}_sms}"
+EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/SMS_CIFAR10_POSTHOC_epoch${EPOCH}}"
 # EVAL_BASE="../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
-EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
+# EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
+EVALUATE_LINKS=(softmax) #(all)
 
 # DIRICHLET_ARG=""
-DIRICHLET_ARG="
-  --dirichlet \
-  --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
-  --dirichlet-max-iter 1000 \
-  --dirichlet-n-jobs 1 \
-"
+# DIRICHLET_ARG="
+#   --dirichlet \
+#   --dirichlet-reg-grid 1e-2 1e-3 1e-4 1e-5 \
+#   --dirichlet-max-iter 1000 \
+#   --dirichlet-n-jobs 1 \
+# "
 
 # Set SMS_ARG="" to omit Structured Matrix Scaling.
 SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
@@ -54,8 +56,8 @@ SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
 MODELS=(
   "resnet50_cross_entropy"
   "resnet50_brier_score"
-  "resnet50_exp_1mp"
-  "resnet50_exp_p"
+  # "resnet50_exp_1mp"
+  # "resnet50_exp_p"
   "resnet50_focal_loss"
   # "resnet50_linear"
   # "resnet50_log_power"
@@ -156,7 +158,6 @@ if [ "$DEBUG" = false ]; then
     --saved_model_name "$MODEL_FILE" \
     -log \
     --posthoc-order ts_first \
-    $GPU_FLAG \
     $SMOKE_ARG \
     --links "${EVALUATE_LINKS[@]}" \
     $DIRICHLET_ARG \

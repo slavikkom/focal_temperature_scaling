@@ -28,12 +28,12 @@ ALPHAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 BETAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 GAMMAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
-LABEL_SMOOTHING_VALUES=() # Set to (0.05 0.1 0.15) to include label-smoothed CE models.
+LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15) # Set to (0.05 0.1 0.15) to include label-smoothed CE models.
 
 EPOCH=350
 GPU_FLAG="" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
-POSTHOC_ORDER=${POSTHOC_ORDER:-ts_last} # ts_first or ts_last
+POSTHOC_ORDER=${POSTHOC_ORDER:-ts_first} # ts_first or ts_last
 CALIBRATION_SIZES=(100 250 500 1000 2500 full)
 
 if [[ "$POSTHOC_ORDER" != ts_first && "$POSTHOC_ORDER" != ts_last ]]; then
@@ -42,26 +42,30 @@ if [[ "$POSTHOC_ORDER" != ts_first && "$POSTHOC_ORDER" != ts_last ]]; then
 fi
 
 LOGITS_BASE="${LOGITS_BASE:-../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}}"
-EVAL_BASE="${EVAL_BASE:-../RESULTS/calibration_size_sweep/CIFAR10_POSTHOC_${POSTHOC_ORDER}_epoch${EPOCH}_sms}"
-EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
+# EVAL_BASE="${EVAL_BASE:-../RESULTS/calibration_size_sweep/CIFAR10_POSTHOC_${POSTHOC_ORDER}_epoch${EPOCH}_sms}"
+EVAL_BASE="${EVAL_BASE:-../RESULTS/calibration_size_sweep/SMS_CIFAR10_POSTHOC_epoch${EPOCH}}"
+# EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
+EVALUATE_LINKS=(softmax) #(all)
 
-# DIRICHLET_ARG=""
-DIRICHLET_ARG="
-  --dirichlet \
-  --dirichlet-reg-grid 1 1e-1 1e-2 1e-3 1e-4 1e-5 \
-  --dirichlet-max-iter 1000 \
-  --dirichlet-n-jobs 1 \
-"
+# Dirichet and SMS implementations are independent of the posthoc order set above.
+# Post-hoc temperature is only concerning our own calibration maps
+DIRICHLET_ARG=""
+# DIRICHLET_ARG="
+#   --dirichlet \
+#   --dirichlet-reg-grid 1 1e-1 1e-2 1e-3 1e-4 1e-5 \
+#   --dirichlet-max-iter 1000 \
+#   --dirichlet-n-jobs 1 \
+# "
 
 # Set SMS_ARG="" to omit Structured Matrix Scaling.
 SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
 
 MODELS=(
   "resnet50_cross_entropy"
-  # "resnet50_brier_score"
+  "resnet50_brier_score"
   # "resnet50_exp_1mp"
   # "resnet50_exp_p"
-  # "resnet50_focal_loss"
+  "resnet50_focal_loss"
   # "resnet50_linear"
   # "resnet50_log_power"
   # "resnet50_one_minus_power"
@@ -174,7 +178,6 @@ if [ "$DEBUG" = false ]; then
     --model-name resnet50 \
     --saved_model_name "$MODEL_FILE" \
     --posthoc-order "$POSTHOC_ORDER" \
-    $GPU_FLAG \
     --links "${EVALUATE_LINKS[@]}" \
     $DIRICHLET_ARG \
     $SMS_ARG \
