@@ -4,6 +4,7 @@ import os
 
 import numpy as np
 import torch
+from Calibs.sms_calibration import add_sms_arguments, load_sms_class
 
 from evaluate import (
     get_probability_export_splits,
@@ -68,20 +69,21 @@ def parse_args():
     parser.add_argument("--dirichlet-n-jobs", type=int, default=1,
                         dest="dirichlet_n_jobs",
                         help="Parallel GridSearchCV workers for Dirichlet calibration.")
+    add_sms_arguments(parser)
     parser.add_argument("--smoke-test", action="store_true", dest="smoke_test",
                         help="Use smoke-test settings for calibration helpers.")
     parser.set_defaults(smoke_test=False)
     parser.add_argument("--seed", type=int, default=None,
                         dest="seed", help="Random seed for reproducibility. Defaults to metadata seed or 1.")
     parser.add_argument("--save-probs", action="store_true", dest="save_probs",
-                        help="Save train/val/test probabilities for the selected --links.")
+                        help="Save train/val/test probabilities for selected links and enabled Dirichlet/SMS.")
     parser.set_defaults(save_probs=False)
     parser.add_argument("--save-train-probs", action="store_true", dest="save_train_probs",
-                        help="Save train probabilities for the selected --links and optional --dirichlet calibration.")
+                        help="Save train probabilities for selected links and enabled Dirichlet/SMS.")
     parser.add_argument("--save-val-probs", action="store_true", dest="save_val_probs",
-                        help="Save validation probabilities for the selected --links and optional --dirichlet calibration.")
+                        help="Save validation probabilities for selected links and enabled Dirichlet/SMS.")
     parser.add_argument("--save-test-probs", action="store_true", dest="save_test_probs",
-                        help="Save test probabilities for the selected --links and optional --dirichlet calibration.")
+                        help="Save test probabilities for selected links and enabled Dirichlet/SMS.")
     parser.add_argument("--json-precision", type=int, default=5, dest="json_precision",
                         help="Number of decimal places to keep for floating point values saved to JSON.")
     parser.add_argument("--train-smece-sample-size", type=int, default=5000,
@@ -159,6 +161,8 @@ def main():
     args = parse_args()
     metadata = load_metadata(args.logits_path)
     args = fill_args_from_metadata(args, metadata)
+    if args.sms:
+        load_sms_class()
     set_seed(args.seed)
 
     device = torch.device("cuda" if args.gpu and torch.cuda.is_available() else "cpu")

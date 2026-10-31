@@ -42,7 +42,7 @@ if [[ "$POSTHOC_ORDER" != ts_first && "$POSTHOC_ORDER" != ts_last ]]; then
 fi
 
 LOGITS_BASE="${LOGITS_BASE:-../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}}"
-EVAL_BASE="${EVAL_BASE:-../RESULTS/calibration_size_sweep/CIFAR10_POSTHOC_${POSTHOC_ORDER}_epoch${EPOCH}}"
+EVAL_BASE="${EVAL_BASE:-../RESULTS/calibration_size_sweep/CIFAR10_POSTHOC_${POSTHOC_ORDER}_epoch${EPOCH}_sms}"
 EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
 
 # DIRICHLET_ARG=""
@@ -52,6 +52,9 @@ DIRICHLET_ARG="
   --dirichlet-max-iter 1000 \
   --dirichlet-n-jobs 1 \
 "
+
+# Set SMS_ARG="" to omit Structured Matrix Scaling.
+SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
 
 MODELS=(
   "resnet50_cross_entropy"
@@ -174,6 +177,7 @@ if [ "$DEBUG" = false ]; then
     $GPU_FLAG \
     --links "${EVALUATE_LINKS[@]}" \
     $DIRICHLET_ARG \
+    $SMS_ARG \
     --seed "$SEED_IDX" \
     --calibration-sizes "${CALIBRATION_SIZES[@]}" \
     --subset-seeds "${SUBSET_SEEDS[@]}" \

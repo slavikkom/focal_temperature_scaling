@@ -331,7 +331,7 @@ def best_link_value_by_val_ce(stats, active_link_dict, link_name, temperature_sc
 
 def probability_export_specs_from_stats(stats, active_link_dict,
                                         include_dirichlet=False,
-                                        posthoc_order='ts_first'):
+                                        posthoc_order='ts_first', include_sms=False):
     specs = []
     for link_name in active_link_dict:
         best_key, best_link_value, best_ce = best_link_value_by_val_ce(
@@ -394,11 +394,23 @@ def probability_export_specs_from_stats(stats, active_link_dict,
             "dirichlet": True,
             "posthoc_order": "dirichlet",
         })
+    if include_sms:
+        sms = stats['sms_calibrated']['softmax']['sms']
+        if sms['status'] == 'ok':
+            specs.append({
+                'method_name': 'softmax+sms', 'filename_suffix': '',
+                'link_name': 'softmax', 'link_value': 1, 'temperature': sms['best']['temperature'],
+                'temperature_metric': 'internal_ts_mix', 'val_ce': sms['val']['CE'],
+                'calibrated_on': 'val', 'sms': True, 'posthoc_order': 'sms',
+                'selection_metric': sms['selection_metric'],
+                'shared_strength': sms['best']['shared_strength'],
+                'smoke_test': sms['smoke_test'], 'cv_folds': sms['cv_folds'],
+            })
     return specs
 
 
 def log_probability_export_specs(specs):
-    print("Probability exports selected by --links/--dirichlet:")
+    print("Probability exports selected by --links/--dirichlet/--sms:")
     for spec in specs:
         detail = spec["method_name"] + spec["filename_suffix"]
         if spec.get("val_ce") is not None:
@@ -448,7 +460,7 @@ def save_probs_labels_indices_npz(filename, probs, labels, indices=None, metadat
 
 
 def save_probability_exports(save_eval_loc, split_logits, split_labels, specs,
-                             dirichlet_probabilities=None):
+                             dirichlet_probabilities=None, sms_probabilities=None):
     with torch.inference_mode():
         for spec in specs:
             metadata = {
@@ -458,11 +470,21 @@ def save_probability_exports(save_eval_loc, split_logits, split_labels, specs,
                 "temperature": float(spec["temperature"]),
                 "temperature_metric": spec["temperature_metric"],
                 "calibrated_on": spec["calibrated_on"],
-                "selection_metric": "val_ce",
+                "selection_metric": spec.get("selection_metric", "val_ce"),
                 "posthoc_order": spec["posthoc_order"],
             }
             if spec.get("val_ce") is not None:
                 metadata["val_ce"] = float(spec["val_ce"])
+
+            if spec.get("sms"):
+                if sms_probabilities is None:
+                    raise ValueError("SMS probability exports requested but not computed.")
+                metadata.update({key: spec[key] for key in ('shared_strength', 'smoke_test', 'cv_folds')})
+                for split_name, labels in split_labels.items():
+                    filename = os.path.join(save_eval_loc, '{}_probs_softmax+sms.npz'.format(split_name))
+                    save_probs_labels_indices_npz(filename, sms_probabilities[split_name], labels, metadata=metadata)
+                    print("Saved probabilities: {}".format(filename))
+                continue
 
             if spec.get("dirichlet"):
                 if dirichlet_probabilities is None:
@@ -671,6 +693,11 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
     save_any_probs = len(probability_export_splits) > 0
     posthoc_order = getattr(args, "posthoc_order", "ts_first")
 
+    include_sms = getattr(args, "sms", False)
+    if include_sms:
+        from Calibs.sms_calibration import load_sms_class
+        load_sms_class()
+
     if net is None:
         net = nn.Identity().to(device)
 
@@ -707,6 +734,16 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
             dirichlet_stats = dirichlet_result
         stats["dirichlet_calibrated"] = dirichlet_stats
 
+    sms_probabilities = None
+    if include_sms:
+        print("ready to run Structured Matrix Scaling evaluation...")
+        stats['sms_calibrated'], sms_probabilities = sms_calibration_evaluation(
+            val_logits, val_labels, test_logits, test_labels,
+            num_classes=num_classes, device=device, train_logits=train_logits, train_labels=train_labels,
+            reg_grid=args.sms_reg_grid, cv_folds=args.sms_cv_folds, seed=args.seed,
+            smoke_test=args.smoke_test, return_probabilities=True,
+            train_smooth_ece_sample_size=train_smooth_ece_sample_size)
+
     if not os.path.exists(args.save_eval_loc):
         os.makedirs(args.save_eval_loc)
 
@@ -724,6 +761,7 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
             active_link_dict,
             include_dirichlet=args.dirichlet,
             posthoc_order=posthoc_order,
+            include_sms=include_sms,
         )
         log_probability_export_specs(probability_export_specs)
         all_split_logits = {
@@ -750,6 +788,7 @@ def run_posthoc_evaluation(args, train_logits, train_labels, val_logits,
             split_labels,
             probability_export_specs,
             dirichlet_probabilities=dirichlet_probabilities,
+            sms_probabilities=sms_probabilities,
         )
 
     return stats, save_stats_json_path

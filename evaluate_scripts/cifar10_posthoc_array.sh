@@ -31,12 +31,12 @@ KAPPAS=(0.25 0.5 0.75 1.0 1.5 2.0 3.0 5.0 7.0)
 LABEL_SMOOTHING_VALUES=(0.05 0.1 0.15)
 
 EPOCH=350
-SMOKE_ARG=""
-GPU_FLAG="" # -g for GPU, empty for CPU
+SMOKE_ARG="" # Set to "--smoke-test" for one fixed-strength SMS fit without CV.
+GPU_FLAG="-g" # -g for GPU, empty for CPU
 DEBUG=${DEBUG:-false}
 
 LOGITS_BASE="../RESULTS/july26/CIFAR10_LOGITS_epoch${EPOCH}"
-EVAL_BASE="../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}"
+EVAL_BASE="${EVAL_BASE:-../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_FIRST_epoch${EPOCH}_sms}"
 # EVAL_BASE="../RESULTS/july26/CIFAR10_POSTHOC_TEMPERATURE_LAST_epoch${EPOCH}"
 EVALUATE_LINKS=(softmax focal focal_linear exp_p exp_1mp one_minus_power log_power) #(all)
 
@@ -47,6 +47,9 @@ DIRICHLET_ARG="
   --dirichlet-max-iter 1000 \
   --dirichlet-n-jobs 1 \
 "
+
+# Set SMS_ARG="" to omit Structured Matrix Scaling.
+SMS_ARG="--sms --sms-reg-grid 0.001 0.01 0.1 1 10 100 --sms-cv-folds 3"
 
 MODELS=(
   "resnet50_cross_entropy"
@@ -157,6 +160,7 @@ if [ "$DEBUG" = false ]; then
     $SMOKE_ARG \
     --links "${EVALUATE_LINKS[@]}" \
     $DIRICHLET_ARG \
+    $SMS_ARG \
     --seed "$SEED_IDX" \
     >> "${SAVE_EVAL_PATH}/${MODEL_NAME}_posthoc.txt"
 fi

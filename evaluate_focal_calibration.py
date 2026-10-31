@@ -52,7 +52,7 @@ def _sample_metric_inputs(y_true, probs, sample_size=None, seed=1):
 
 
 def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
-             smooth_ece_sample_seed=1, metrics=None):
+             smooth_ece_sample_seed=1, metrics=None, log_probs=None):
     # Keep the historical output by default. Sweeps avoid expensive smooth ECE.
     if metrics is not None:
         unknown = set(metrics) - {'CE', 'ECE'}
@@ -60,7 +60,7 @@ def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
             raise ValueError('Unsupported restricted metrics: {}'.format(sorted(unknown)))
         result = {}
         if 'CE' in metrics:
-            result['CE'] = nn.NLLLoss()(torch.log(probs), y_true.long()).item()
+            result['CE'] = nn.NLLLoss()(torch.log(probs) if log_probs is None else log_probs, y_true.long()).item()
         if 'ECE' in metrics:
             result['ECE'] = AdaptiveECELoss(return_stats=True)(probs, y_true.long())
         return result
@@ -75,7 +75,7 @@ def evaluate(y_true, probs, num_classes=10, smooth_ece_sample_size=None,
     smooth_calibration_criterion = SmoothECELoss(return_sigma=True)
     fixed_smooth_calibration_criterion = SmoothECELoss(bandwidth=0.05)
         
-    epoch_loss['CE'] = log_loss_criterion(torch.log(probs), y_true.long()).item()
+    epoch_loss['CE'] = log_loss_criterion(torch.log(probs) if log_probs is None else log_probs, y_true.long()).item()
     epoch_loss['ECE'] = calibration_criterion(probs, y_true.long())
     smooth_y_true, smooth_probs = _sample_metric_inputs(
         y_true,
@@ -115,6 +115,49 @@ def _to_numpy_array(values):
     if torch.is_tensor(values):
         return values.detach().cpu().numpy()
     return np.asarray(values)
+
+
+def sms_calibration_evaluation(val_logits, val_labels, test_logits, test_labels,
+                               num_classes=10, device='cpu', train_logits=None,
+                               train_labels=None, reg_grid=None, cv_folds=3, seed=1,
+                               smoke_test=False, return_probabilities=False,
+                               train_smooth_ece_sample_size=5000, metrics=None):
+    from Calibs.sms_calibration import fit_sms, predict_sms_log_proba
+
+    def probabilities(logits):
+        return _to_numpy_array(get_probs(logits, T=1, a=1, link='softmax'))
+
+    estimator, result = fit_sms(probabilities(val_logits), _to_numpy_array(val_labels),
+                                reg_grid=reg_grid, cv_folds=cv_folds, seed=seed,
+                                smoke_test=smoke_test)
+    predictions = {}
+    if estimator is not None:
+        splits = [('val', val_logits, val_labels), ('test', test_logits, test_labels)]
+        if train_logits is not None and train_labels is not None:
+            splits.append(('train', train_logits, train_labels))
+        for split, logits, labels in splits:
+            try:
+                log_probs = torch.as_tensor(
+                    predict_sms_log_proba(estimator, probabilities(logits)),
+                    dtype=torch.float64, device=device)
+                probs = log_probs.exp()
+                split_metrics = evaluate(
+                    labels, probs, num_classes=num_classes, metrics=metrics, log_probs=log_probs,
+                    smooth_ece_sample_size=train_smooth_ece_sample_size if split == 'train' else None,
+                    smooth_ece_sample_seed=seed)
+                if not np.isfinite(split_metrics['CE']) or not np.isfinite(sum(split_metrics['ECE']['ece'])):
+                    raise ValueError("Selected SMS map produced nonfinite metrics.")
+                result[split] = split_metrics
+                predictions[split] = probs
+            except Exception as exc:
+                # Keep selection diagnostics; test outcomes must never trigger another fit.
+                result.update(status='unavailable', reason='SMS {} scoring failed: {}: {}'.format(
+                    split, type(exc).__name__, exc))
+                break
+    stats = {'softmax': {'sms': result}}
+    if return_probabilities:
+        return stats, predictions
+    return stats
 
 
 def _add_missing_class_examples(probs, labels, num_classes):

@@ -18,13 +18,14 @@ import numpy as np
 import sklearn
 import torch
 from torch import nn
+from Calibs.sms_calibration import add_sms_arguments, load_sms_class, sms_provenance
 
 from evaluate import (
     evaluation_json_path, get_active_link_dict, normalize_links,
     link_value_to_key, method_name_for_link, round_floats_for_json, set_seed,
 )
 from evaluate_focal_calibration import (
-    dirichlet_calibration_evaluation, focal_calibration_evaluation,
+    dirichlet_calibration_evaluation, focal_calibration_evaluation, sms_calibration_evaluation,
 )
 
 
@@ -53,6 +54,7 @@ def parse_args(argv=None):
     parser.add_argument("--dirichlet-reg-grid", nargs="+", type=float)
     parser.add_argument("--dirichlet-max-iter", type=int, default=1024)
     parser.add_argument("--dirichlet-n-jobs", type=int, default=1)
+    add_sms_arguments(parser)
     parser.add_argument("--json-precision", type=int, default=5,
                         help="Precision for nested metrics; selected metrics/summaries retain full precision.")
     return parser.parse_args(argv)
@@ -223,6 +225,14 @@ def experiment_identity(args, metadata, device, sizes, active_links):
                   "new_links.py", "Metrics/metrics.py"]
     code_files += [str(p.relative_to(code_root)) for p in
                    sorted((code_root / "Calibs").glob("*.py")) if not p.name.startswith("test_")]
+    sms = None
+    if getattr(args, "sms", False):
+        sms = {"reg_grid": args.sms_reg_grid, "cv_folds": args.sms_cv_folds,
+               "penalty": "ridge", "rho": 1.0, "tau": 1.0, "opt": "bfgs",
+               "provenance": sms_provenance()}
+        code_files += [str(p.relative_to(code_root)) for p in
+                       sorted((code_root / "Calibs/probmetrics/probmetrics").rglob("*.py"))]
+        code_files.append("Calibs/probmetrics/pyproject.toml")
     return json_safe(sanitize_saved_paths({
         "version": 2, "sources": sources, "source_metadata": metadata,
         "code_sha256": {name: sha256(code_root / name) for name in code_files},
@@ -236,6 +246,7 @@ def experiment_identity(args, metadata, device, sizes, active_links):
         "dirichlet_cv_folds": args.dirichlet_cv_folds,
         "dirichlet_max_iter": args.dirichlet_max_iter,
         "dirichlet_n_jobs": args.dirichlet_n_jobs,
+        "sms": sms,
         "device": str(device), "torch": torch.__version__,
         "numpy": np.__version__, "sklearn": sklearn.__version__,
         "torch_num_threads": torch.get_num_threads(),
@@ -250,7 +261,8 @@ def metric_pair(metrics):
     return {"NLL": float(metrics["CE"]), "ECE": float(sum(metrics["ECE"]["ece"]))}
 
 
-def selected_methods(stats, active_links, order, include_dirichlet, dirichlet_reason=None):
+def selected_methods(stats, active_links, order, include_dirichlet, dirichlet_reason=None,
+                     include_sms=False):
     """Select with validation NLL only, before attaching any test metrics."""
     selections = {}
     for link, values in active_links.items():
@@ -284,6 +296,17 @@ def selected_methods(stats, active_links, order, include_dirichlet, dirichlet_re
                 "parameters": result["best"],
                 "val": metric_pair(result["val"]), "test": metric_pair(result["test"]),
             }
+    if include_sms:
+        result = stats["sms_calibrated"]["softmax"]["sms"]
+        selected = {"status": result["status"], "selection_metric": result["selection_metric"]}
+        if "best" in result:
+            selected["parameters"] = result["best"]
+        if "reason" in result:
+            selected["reason"] = result["reason"]
+        for split in ("val", "test"):
+            if split in result:
+                selected[split] = metric_pair(result[split])
+        selections["softmax+sms"] = selected
     for result in selections.values():
         if result["status"] == "ok" and any(
                 not math.isfinite(v) for split in ("val", "test") for v in result[split].values()):
@@ -292,10 +315,10 @@ def selected_methods(stats, active_links, order, include_dirichlet, dirichlet_re
     return json_safe(selections)
 
 
-def method_names(active_links, order, include_dirichlet):
+def method_names(active_links, order, include_dirichlet, include_sms=False):
     names = [method_name_for_link(link, scaled, order)
              for link in active_links for scaled in (False, True)]
-    return names + (["softmax+dirichlet"] if include_dirichlet else [])
+    return names + (["softmax+dirichlet"] if include_dirichlet else []) + (["softmax+sms"] if include_sms else [])
 
 
 def summarize(records, names, requested, full=False):
@@ -325,6 +348,9 @@ def run_calibration_size_sweep(args, metadata, device, load_split=None):
     load_split = load_split or load_split_npz
     if metadata.get("smoke_test", False):
         raise ValueError("Sweeps require regular calibration data, not smoke-test artifacts; use small cached fixtures without smoke-test metadata.")
+    include_sms = getattr(args, "sms", False)
+    if include_sms:
+        load_sms_class()
     if (not args.subset_seeds or len(set(args.subset_seeds)) != len(args.subset_seeds)
             or any(s < 0 or s >= 2**32 for s in args.subset_seeds)):
         raise ValueError("Subset seeds must be unique integers in [0, 2**32).")
@@ -351,7 +377,7 @@ def run_calibration_size_sweep(args, metadata, device, load_split=None):
         write_json(manifest_path, identity)
     fingerprint = hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
     orders = {seed: nested_class_order(labels_np, seed) for seed in args.subset_seeds}
-    names = method_names(active_links, args.posthoc_order, args.dirichlet)
+    names = method_names(active_links, args.posthoc_order, args.dirichlet, include_sms)
     summaries = {}
     for size in sizes:
         full = size == pool_size
@@ -404,7 +430,13 @@ def run_calibration_size_sweep(args, metadata, device, load_split=None):
                                 num_classes=num_classes, device=device, reg_grid=args.dirichlet_reg_grid,
                                 cv_folds=args.dirichlet_cv_folds, max_iter=args.dirichlet_max_iter,
                                 n_jobs=args.dirichlet_n_jobs, seed=run_meta["fit_seed"], metrics=("CE", "ECE"))
-                    selected = selected_methods(stats, active_links, args.posthoc_order, args.dirichlet, dirichlet_reason)
+                    if include_sms:
+                        stats["sms_calibrated"] = sms_calibration_evaluation(
+                            subset_logits, subset_labels, test_logits, test_labels,
+                            num_classes=num_classes, device=device, reg_grid=args.sms_reg_grid,
+                            cv_folds=args.sms_cv_folds, seed=run_meta["fit_seed"], metrics=("CE", "ECE"))
+                    selected = selected_methods(stats, active_links, args.posthoc_order, args.dirichlet,
+                                                dirichlet_reason, include_sms=include_sms)
                     record = round_floats_for_json(stats, args.json_precision)
                     # Retain full precision for selection/aggregation, including after resume.
                     record["selected_methods"] = selected
